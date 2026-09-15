@@ -19,5 +19,11 @@ public interface IStockRepository
     /// <summary>The committed quantity, read after a failed deduction to tell the caller what is left.</summary>
     Task<int> GetAvailableQuantityAsync(string productCode, CancellationToken cancellationToken);
 
-    // Task 6: Task<int> RestoreAsync(string productCode, int quantity, CancellationToken cancellationToken);
+    /// <summary>
+    /// <c>UPDATE products SET available_quantity += @quantity WHERE code = @code</c>. Returns rows
+    /// affected, which is <c>1</c> whenever <c>fk_order_lines_products</c> holds; the caller treats
+    /// anything else as a broken catalogue, not a business outcome. Same lock and timeout behaviour
+    /// as <see cref="TryDeductAsync"/>.
+    /// </summary>
+    Task<int> RestoreAsync(string productCode, int quantity, CancellationToken cancellationToken);
 }

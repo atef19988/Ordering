@@ -264,3 +264,46 @@ Tasks 12–14). The brief's hard rules are unchanged; these say where throughput
 - **`FindAsync` returning nothing after a key collision** (the row we collided with vanished
   before we could read it) is answered as `409 idempotency.in_progress`. It cannot happen without
   a manual delete, but the handler must return *something* retryable rather than throw.
+
+### Task 6 — cancel
+
+- **Built without test code** (owner instruction: "skip tests"). The two test boxes in the task
+  file are left for Task 8's harness; the rest was verified by hand against the compose
+  database (see the note under the task's Definition of done). `IdempotencyTests`'s
+  cancel-then-replay case still applies the guarded `UPDATE` by hand and keeps its `// Task 6:`
+  marker for Task 8 to switch to the endpoint.
+- **The status column is the lock; the handler never decides in C#.** `IOrderRepository.
+  TryCancelAsync` runs `UPDATE orders SET status = 'Cancelled', cancelled_at = @now WHERE id = @id
+  AND status = 'Confirmed'` as raw parameterized SQL on the transaction's connection and returns
+  rows affected. `1` → this request restores stock; `0` → one committed read through the Task 3
+  query tells `200` (already `Cancelled`, idempotent, nothing written) from `404`. Of N racing
+  cancels exactly one sees `1`, so stock is restored exactly once. `OrderErrors.AlreadyCancelled`
+  from Task 2 is therefore unused by the endpoint and kept only for its catalogue test.
+- **The 200 body on the cancelling branch is read back inside the transaction.** The Task 4 rule
+  (a Dapper read on a second connection would block on our own uncommitted order row — or, once
+  RCSI is on, would still see `Confirmed`) applies here too, but a cancel has no aggregate in
+  memory to build the DTO from. So `IOrderRepository.ReadBackAsync` runs the Task 3 projection
+  (`OrderQueryRepository.GetByIdAsync`, made reusable on a caller-supplied connection) through
+  Dapper on the EF connection and transaction. One round trip, the exact `GET /api/orders/{id}`
+  shape including the live `notificationStatus`, and the lines arrive `ORDER BY product_code`,
+  which is the restore order. The read runs *between* the status flip and the restores; the
+  restores are still the last statements before `COMMIT`. Being Dapper on the EF connection, this
+  read does not pass through EF interceptors (the test `SqlStatementLog` will not list it).
+- **Restore is one `UPDATE products SET available_quantity += @qty WHERE code = @code` per line**,
+  in product-code order — the same collation order create deducts in — so a cancel racing a
+  create on overlapping products cannot deadlock (50-round race above: zero 1205). The
+  repository returns rows affected like `TryDeductAsync`; the handler throws
+  `InvalidOperationException` on anything but `1`, because `fk_order_lines_products` makes that
+  a broken catalogue, not a business outcome (500 via the middleware, transaction rolled back).
+- **Two lock timeouts, two 503s.** A product row held past `LOCK_TIMEOUT` during a restore is
+  `503 stock.busy` + `Retry-After: 1`, exactly as in create, and the status flip rolls back with
+  it. The order row itself can also be held past the timeout — the winner of a cancel race holds
+  it while its restores wait on product rows — so `TryCancelAsync` translates 1222 against
+  `orders` and the handler answers `503 order.busy` + `Retry-After: 1` (`OrderErrors.OrderBusy`,
+  new) rather than a 500. Both are safe to retry; nothing was committed.
+- **No validator on `CancelOrderCommand`.** The route constraint `{id:long}` already types the
+  id; an id that cannot exist (0, negative) is a `404`, the same answer `GET` gives.
+- **Cancelling does not touch the notification (known, accepted).** The `order.created` outbox
+  row is neither removed nor changed. If it is still `Pending` when the order is cancelled, the
+  relay (Task 7) still publishes it and the consumer still delivers it — the created event really
+  did happen. The cancel response and `GET` simply keep reporting whatever that row's status is.

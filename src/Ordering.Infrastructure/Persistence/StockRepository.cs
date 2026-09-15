@@ -38,4 +38,26 @@ internal sealed class StockRepository(OrderingDbContext context) : IStockReposit
         context.Database
             .SqlQuery<int>($"SELECT available_quantity AS [Value] FROM products WHERE code = {productCode}")
             .SingleAsync(cancellationToken);
+
+    /// <summary>
+    /// The mirror of <see cref="TryDeductAsync"/>: same row lock, same timeout translation, no
+    /// guard needed because adding stock cannot violate <c>ck_products_qty_non_negative</c>.
+    /// </summary>
+    public async Task<int> RestoreAsync(string productCode, int quantity, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await context.Database.ExecuteSqlAsync(
+                $"""
+                UPDATE products
+                   SET available_quantity = available_quantity + {quantity}
+                 WHERE code = {productCode};
+                """,
+                cancellationToken);
+        }
+        catch (Exception exception) when (SqlErrors.TryTranslate(exception, IStockRepository.LockedResource, out var translated))
+        {
+            throw translated;
+        }
+    }
 }

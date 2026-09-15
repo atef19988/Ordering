@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Ordering.Application.Abstractions.Messaging;
+using Ordering.Application.Features.Orders.CancelOrder;
 using Ordering.Application.Features.Orders.CreateOrder;
 using Ordering.Application.Features.Orders.GetOrderById;
 
@@ -39,7 +40,14 @@ public static class OrdersEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
-        // Task 6: POST /{id:long}/cancel
+        // Idempotent: cancelling an already cancelled order is 200 with its current state. A 503
+        // (order or product row busy) carries Retry-After and committed nothing.
+        orders.MapPost("/{id:long}/cancel", async (long id, IDispatcher dispatcher, CancellationToken cancellationToken) =>
+                (await dispatcher.Send(new CancelOrderCommand(id), cancellationToken)).ToHttpResult())
+            .WithName("CancelOrder")
+            .Produces<OrderDetailDto>()
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return api;
     }

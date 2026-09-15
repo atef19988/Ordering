@@ -21,6 +21,11 @@ public static class OrderErrors
     public static Error NotFound(long orderId) =>
         Error.NotFound("order.not_found", $"Order '{orderId}' was not found.");
 
+    /// <summary>The order row stayed locked by another writer (a racing cancel) for the whole lock timeout. Nothing was committed.</summary>
+    public static Error OrderBusy(long orderId) =>
+        new RetryableError("order.busy", $"Order '{orderId}' is busy; retry the same request.", ErrorType.Unavailable, RetryAfterSeconds);
+
+    /// <summary>Kept for the Task 2 catalogue; the cancel endpoint (Task 6) answers an already cancelled order with <c>200</c>, not this.</summary>
     public static Error AlreadyCancelled(long orderId) =>
         Error.Conflict("order.already_cancelled", $"Order '{orderId}' is already cancelled.");
 

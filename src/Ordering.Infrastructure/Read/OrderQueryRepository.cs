@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Dapper;
 using Ordering.Application.Features.Orders;
 using Ordering.Application.Features.Orders.GetOrderById;
@@ -34,18 +35,31 @@ internal sealed class OrderQueryRepository(IDbConnectionFactory connectionFactor
         """;
 
     public Task<OrderDetailDto?> GetByIdAsync(long id, CancellationToken cancellationToken) =>
-        QueryMultipleAsync(GetByIdSql, new { id }, async grid =>
+        QueryMultipleAsync(GetByIdSql, new { id }, ReadAsync, cancellationToken);
+
+    /// <summary>
+    /// The same projection on a connection the caller owns — how the write side reads an order
+    /// back inside its transaction (<c>OrderRepository.ReadBackAsync</c>) without a second
+    /// connection that would block on its own uncommitted rows. Not a query-side entry point.
+    /// </summary>
+    internal static async Task<OrderDetailDto?> GetByIdAsync(DbConnection connection, DbTransaction? transaction, long id, CancellationToken cancellationToken)
+    {
+        using var grid = await connection.QueryMultipleAsync(new CommandDefinition(GetByIdSql, new { id }, transaction, cancellationToken: cancellationToken));
+        return await ReadAsync(grid);
+    }
+
+    private static async Task<OrderDetailDto?> ReadAsync(SqlMapper.GridReader grid)
+    {
+        var header = await grid.ReadSingleOrDefaultAsync<OrderRow>();
+
+        if (header is null)
         {
-            var header = await grid.ReadSingleOrDefaultAsync<OrderRow>();
+            return null;
+        }
 
-            if (header is null)
-            {
-                return null;
-            }
-
-            var lines = (await grid.ReadAsync<OrderLineDto>()).AsList();
-            return header.ToDto(lines);
-        }, cancellationToken);
+        var lines = (await grid.ReadAsync<OrderLineDto>()).AsList();
+        return header.ToDto(lines);
+    }
 
     private sealed record OrderRow(
         long Id,
