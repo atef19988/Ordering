@@ -1,5 +1,5 @@
 ---
-description: Task 8 — required tests on a real SQL Server
+description: Task 8 — required tests on real SQL Server + RabbitMQ
 ---
 
 ## Task 8
@@ -11,7 +11,7 @@ Read, in this order:
 
 Then implement it completely.
 
-**Focus:** Testcontainers.MsSql only. EF in-memory is forbidden. Release concurrent requests from a real barrier.
+**Focus:** Testcontainers.MsSql + Testcontainers.RabbitMq only. EF in-memory is forbidden. Release concurrent requests from a real barrier. Pay back the Task 3/4 tests here.
 
 ### How to work
 

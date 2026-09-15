@@ -1,6 +1,11 @@
 # Task 5 — Idempotency lifecycle
 
-Read `docs/architecture.md` §4 first. Implement exactly that design.
+Read `docs/architecture.md` §1 and §4 first. Implement exactly that design.
+
+This task also **reorders the create transaction** that Task 4 built: everything that needs no
+product row lock happens first, the conditional stock update happens last. Two things fall out
+of that: a duplicate key conflicts before it ever touches stock, and a hot product row is locked
+for one round trip plus the commit instead of the whole handler. Task 12 measures the difference.
 
 ## Table
 
@@ -15,6 +20,37 @@ CREATE TABLE idempotency_keys (
 
 (`key` is a reserved word in T-SQL; the column is `idempotency_key` everywhere.)
 
+## Entity and store
+
+The key row is written by EF in the **same `SaveChanges`** as the order, so the FK to `orders`
+is satisfied inside one batch and a primary-key violation surfaces as one `DbUpdateException`.
+
+```
+Application/Idempotency/IdempotencyKey.cs        entity: Key, RequestHash, OrderId, CreatedAt (all set in the ctor, no setters)
+Application/Idempotency/IIdempotencyStore.cs     void Add(IdempotencyKey key);
+                                                 Task<IdempotencyKey?> FindAsync(string key, CancellationToken ct);   // new connection, read-only
+Application/Idempotency/RequestFingerprint.cs    Compute(CreateOrderCommand) → SHA-256 hex
+Infrastructure/Persistence/IdempotencyStore.cs   Add = context.Add; FindAsync = Dapper on IDbConnectionFactory
+Infrastructure/Persistence/Configurations/IdempotencyKeyConfiguration.cs
+```
+
+`FindAsync` runs on its own connection because the handler calls it *after* rolling back — the
+EF connection's transaction is gone by then, and a read on a second connection would otherwise
+have blocked on our own uncommitted rows.
+
+## Translating SQL errors — Infrastructure only
+
+`Application` never sees `SqlException`. Infrastructure translates two error numbers into typed
+exceptions declared in `Application/Abstractions/Persistence/`:
+
+| SQL Server | Thrown as | Where |
+|---|---|---|
+| 2627 / 2601 (unique violation) | `UniqueViolationException(string ConstraintName)` — name parsed from the message | `UnitOfWork.SaveChangesAsync` |
+| 1222 (lock request time-out) | `LockTimeoutException(string Resource)` — the *call site* names the resource: `"idempotency_keys"` or `"products"` | `UnitOfWork.SaveChangesAsync`, `StockRepository.TryDeductAsync` |
+
+Check `Number` and the constraint name; never a free-text message match alone. Anything else
+propagates as today (500 via `ExceptionHandlingMiddleware`).
+
 ## Hashing — `Application/Idempotency/RequestFingerprint.cs`
 
 `Compute(CreateOrderCommand)` → SHA-256 hex of the canonical form:
@@ -24,32 +60,64 @@ customerReference.Trim()          (case-sensitive; document this)
 + '|' + lines ordered by productCode, each "CODE:QTY"
 ```
 
-No whitespace, no JSON key order, no headers involved. Document this definition verbatim in the
-README under "Payload equivalence".
+Product codes are normalised the way Task 4 normalises them (trimmed, catalogue casing is not
+known yet at hash time, so upper-case them — say so). No whitespace, no JSON key order, no
+headers involved. Document this definition verbatim in the README under "Payload equivalence".
+
+## Result shape
+
+The command now returns `CreateOrderResponse(OrderDetailDto Order, bool Replayed)`. The endpoint
+maps `Replayed ? 200 OK : 201 Created` — that is the only branch it is allowed to have, and it is
+on a result flag, not a business rule. Task 14's admission behaviour reads the same flag.
+
+Two additions to the single Result→HTTP mapping in `ResultExtensions`:
+- `ErrorType.Unavailable` → `503`.
+- `Error.Details["retryAfterSeconds"]` (int) → `Retry-After` header, on any status.
 
 ## Flow in `CreateOrderCommand` handler
 
-1. Run `SET LOCK_TIMEOUT 3000;` on the transaction's connection at the start (it is
-   connection-scoped in SQL Server, so issue it inside the transaction every time).
-2. Do the work from Task 4.
-3. `INSERT INTO idempotency_keys(idempotency_key, request_hash, order_id, created_at) VALUES (...)`.
-4. On `SqlException` with `Number` `2627` (primary-key violation) whose message names
-   `pk_idempotency_keys` → roll back, then on a **new** connection read the existing row:
-   - `request_hash` matches → load the order via the Task 3 query → `200 OK` (not 201).
-   - `request_hash` differs → `409` with code `idempotency.key_reuse`.
-5. On `SqlException` with `Number` `1222` (lock request time-out) → `409` with code
-   `idempotency.in_progress` and header `Retry-After: 1`.
+1. `await UnitOfWork.SetLockTimeoutAsync(TimeSpan.FromSeconds(3), ct)` — issues
+   `SET LOCK_TIMEOUT 3000;` on the transaction's connection. It is connection-scoped in SQL
+   Server, so it runs inside the transaction every time.
+2. Catalogue prices in code order, unknown code → 404 (Task 4, unchanged).
+3. Build the `Order`; stage order + lines + outbox row (Task 4) **and**
+   `IIdempotencyStore.Add(new IdempotencyKey(key, RequestFingerprint.Compute(command), order.Id, Clock.UtcNow))`.
+4. `await UnitOfWork.SaveChangesAsync(ct)` — one batch: `orders`, `order_lines`,
+   `outbox_messages`, `idempotency_keys`. The handler calls this itself; the base class's final
+   save becomes a no-op (nothing left to flush). Say so in the README.
+   - `UniqueViolationException { ConstraintName: "pk_idempotency_keys" }` → `RollbackAsync`,
+     then `IIdempotencyStore.FindAsync(key)`:
+     - `RequestHash` matches → load the order through the Task 3 query →
+       `Replayed: true` → `200 OK`.
+     - `RequestHash` differs → `409 idempotency.key_reuse`.
+   - `LockTimeoutException { Resource: "idempotency_keys" }` → `409 idempotency.in_progress`,
+     `retryAfterSeconds: 1`.
+5. Conditional stock decrement per line, in catalogue code order (`IStockRepository.TryDeductAsync`,
+   unchanged). Zero rows → `409 stock.insufficient`; the whole transaction rolls back —
+   **including the key row**, so a stock conflict does not consume the key and the same key may
+   be retried once stock exists.
+   - `LockTimeoutException { Resource: "products" }` → `503 stock.busy`, `retryAfterSeconds: 1`.
+     Nothing was committed; the client retries with the same key.
+6. Return success → `TransactionBehavior` commits → `201 Created`.
 
-Catch the violation as narrowly as possible — check `Number` and the constraint name, never a
-free-text message match alone. A duplicate that arrives while the first transaction is still open
-blocks on the primary-key lock (SQL Server holds the key lock until commit), so the second caller
-sees either the committed row or the timeout — never a half-written order.
+`IUnitOfWork` gains `SetLockTimeoutAsync(TimeSpan, CancellationToken)`; the SQL stays in
+Infrastructure.
 
 ## Why this shape
 
 The key row commits with the order, so there is no in-progress state to clean up after a crash,
-and a duplicate that arrives mid-flight simply waits for the row lock and then replays. Do not
-replace it with a read-then-insert "check if key exists" — that is a race.
+and a duplicate that arrives mid-flight simply waits for the primary-key lock and then replays.
+Do not replace it with a read-then-insert "check if key exists" — that is a race.
+
+Writing the key row *before* the stock update means the second of two racing duplicates blocks on
+`pk_idempotency_keys` while the first is still inside the transaction, and never reaches the
+product row. Concurrent duplicates therefore cost the hot product nothing. And because the stock
+update is the last statement, the exclusive lock on `products` is held for exactly one round
+trip plus the commit's log flush — the shortest window this design allows.
+
+A 409 for stock now rolls back four inserts instead of zero. That is accepted: stock conflicts
+are the minority path, and Task 12 adds a lock-free pre-check that answers the obvious ones
+before anything is written.
 
 ## Replay semantics
 
@@ -65,3 +133,6 @@ replace it with a read-then-insert "check if key exists" — that is a race.
 - [ ] 20 concurrent requests, same key, same payload → exactly one order, one deduction, one `order.created` outbox row
 - [ ] Missing `Idempotency-Key` → 400
 - [ ] Cancel then replay → 200 with `Cancelled`, stock not deducted again
+- [ ] Stock conflict does not consume the key: 409, then restock, then the same key → 201
+- [ ] A test connection holding an exclusive lock on the product row → `503 stock.busy` with `Retry-After: 1` after ~3 s, and no order row
+- [ ] SQL log (or EF command interceptor) shows the `UPDATE products` as the last statement before `COMMIT`

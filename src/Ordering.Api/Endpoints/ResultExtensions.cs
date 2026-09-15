@@ -19,7 +19,13 @@ public static class ResultExtensions
 
     private static IResult ToProblem(Error error)
     {
+        // `code` always; structured facts (e.g. productCode/available for stock.insufficient) beside it.
         var extensions = new Dictionary<string, object?> { ["code"] = error.Code };
+
+        foreach (var (key, value) in error.Details)
+        {
+            extensions[key] = value;
+        }
 
         return error switch
         {

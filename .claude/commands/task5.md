@@ -11,7 +11,7 @@ Read, in this order:
 
 Then implement it completely.
 
-**Focus:** Unique index enforces it, not a read-then-write check. Define payload equivalence precisely.
+**Focus:** Unique index enforces it, not a read-then-write check. Key row goes in the same `SaveChanges` as the order; the stock `UPDATE` is the last statement before commit. Define payload equivalence precisely.
 
 ### How to work
 

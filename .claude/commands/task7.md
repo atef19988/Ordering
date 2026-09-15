@@ -1,5 +1,5 @@
 ---
-description: Task 7 — outbox dispatcher and notification worker
+description: Task 7 — outbox relay, RabbitMQ, notification consumers
 ---
 
 ## Task 7
@@ -11,7 +11,7 @@ Read, in this order:
 
 Then implement it completely.
 
-**Focus:** `WITH (UPDLOCK, READPAST, ROWLOCK)` claim + lease, bounded retries with backoff, stable Snowflake event id, survives restart.
+**Focus:** Relay claims with `WITH (UPDLOCK, READPAST, ROWLOCK)` + lease and publishes with confirms; consumers write the verdict back guarded by `status = 'Processing'`; retry tiers, reaper, stable `MessageId` = Snowflake event id. No RabbitMQ type outside `Infrastructure/Messaging`.
 
 ### How to work
 

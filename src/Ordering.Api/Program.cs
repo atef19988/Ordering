@@ -1,9 +1,10 @@
 using Microsoft.OpenApi;
+using Ordering.Api.Endpoints;
 using Ordering.Api.Health;
 using Ordering.Api.Logging;
 using Ordering.Api.Middleware;
-using Ordering.Api.Serialization;
 using Ordering.Application;
+using Ordering.Application.Abstractions.Serialization;
 using Ordering.Infrastructure;
 using Ordering.Infrastructure.Persistence;
 using Serilog;
@@ -45,7 +46,9 @@ app.UseSwaggerUI();
 
 app.MapHealthChecks("/health");
 
-// Task 3: var api = app.MapGroup("/api"); api.MapProducts(); api.MapOrders();
+var api = app.MapGroup("/api");
+api.MapProducts();
+api.MapOrders();
 
 if (app.Configuration.GetValue<bool>(Ordering.Infrastructure.DependencyInjection.InitializeOnStartupKey))
 {

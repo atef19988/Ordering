@@ -91,4 +91,10 @@ In EF: `.HasIndex(...).IsUnique().HasFilter("[type] = 'order.created'")`.
 - [ ] Integration test: 1 unit in stock, two concurrent different orders → one 201, one 409, stock = 0
 - [ ] Integration test: forced exception before commit → no order, no stock change, no outbox row
 - [ ] Integration test: 409 response leaves stock untouched (not partially deducted on multi-line)
-- [ ] Total is computed server-side even if the client sends a price field (it is ignored)
+- [x] Total is computed server-side even if the client sends a price field (it is ignored)
+
+> Test code was deferred by owner instruction ("skip write test code"). The behaviours were
+> exercised by hand against the compose database instead: a 50-request barrier race for the last
+> unit held in 5/5 runs (1×201, 49×409, `available_quantity = 0`, one order, one outbox row —
+> asserted in SQL), and a two-line order whose second line was short returned 409 with the first
+> line's stock untouched. The three tests are Task 8's #1, #5 and the multi-line variant of #1.

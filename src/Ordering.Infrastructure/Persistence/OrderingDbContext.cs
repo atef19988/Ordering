@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Ordering.Application.Abstractions.Outbox;
 using Ordering.Domain.Orders;
 using Ordering.Domain.Products;
 
@@ -14,6 +15,8 @@ public sealed class OrderingDbContext(DbContextOptions<OrderingDbContext> option
     public DbSet<Order> Orders => Set<Order>();
 
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
+
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder) =>
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(OrderingDbContext).Assembly);

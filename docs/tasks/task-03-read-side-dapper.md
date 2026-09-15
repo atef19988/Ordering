@@ -66,5 +66,9 @@ and return `result.ToHttpResult()`. Nothing else.
 
 - [ ] Integration test: seeded products come back with exact decimal prices (12.50, not 12.5000001)
 - [ ] Integration test: unknown order id → 404 ProblemDetails
-- [ ] Order detail returns lines ordered by product code and a `notificationStatus`
-- [ ] No EF `DbContext` reference anywhere in `Infrastructure/Read`
+- [x] Order detail returns lines ordered by product code and a `notificationStatus`
+- [x] No EF `DbContext` reference anywhere in `Infrastructure/Read`
+
+> Test code was deferred by owner instruction ("skip write test code") when Tasks 3 and 4 were
+> built together; both behaviours above were verified by hand against the compose database
+> (`12.50` / `4.00` on the wire, `order.not_found` 404). The two tests belong in Task 8's harness.

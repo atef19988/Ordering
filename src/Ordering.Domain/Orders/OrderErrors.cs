@@ -9,7 +9,7 @@ namespace Ordering.Domain.Orders;
 public static class OrderErrors
 {
     public static Error InsufficientStock(string productCode, int available) =>
-        Error.Conflict("stock.insufficient", $"Product '{productCode}' has only {available} unit(s) available.");
+        new InsufficientStockError(productCode, available);
 
     public static Error NotFound(long orderId) =>
         Error.NotFound("order.not_found", $"Order '{orderId}' was not found.");

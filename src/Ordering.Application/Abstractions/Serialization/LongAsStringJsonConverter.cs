@@ -2,11 +2,12 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Ordering.Api.Serialization;
+namespace Ordering.Application.Abstractions.Serialization;
 
 /// <summary>
 /// Snowflake ids use up to 63 bits; JavaScript numbers are exact only to 2^53. Every <c>long</c>
-/// therefore crosses the wire as a JSON string (and is accepted back as string or number).
+/// therefore crosses the wire as a JSON string (and is accepted back as string or number). Used by
+/// the API's JSON options and by outbox payloads, so both speak the same dialect.
 /// </summary>
 public sealed class LongAsStringJsonConverter : JsonConverter<long>
 {

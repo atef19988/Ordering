@@ -33,6 +33,18 @@ All three were owner instructions; every spec under `docs/` is written for this 
 | PostgreSQL 16, Npgsql, Testcontainers.PostgreSql | SQL Server 2022, Microsoft.Data.SqlClient, Testcontainers.MsSql | Row-lock semantics of the conditional `UPDATE` are the same; worker claiming uses `UPDLOCK, READPAST` instead of `SKIP LOCKED`. |
 | GUID v7 ids | 64-bit Snowflake ids (`SnowflakeIdGenerator`) | `bigint` keys that append in clustered order; the event id is known before the outbox row is written. |
 
+## Scope decisions made after Task 4
+
+Owner instructions, taken when the build plan was extended for load (`docs/tasks/00-overview.md`,
+Tasks 12–14). The brief's hard rules are unchanged; these say where throughput comes from.
+
+| Decision | Instead of | Consequence |
+|---|---|---|
+| **RabbitMQ** carries outbox events to the notification consumers and best-effort change hints to the API instances (Tasks 7, 13) | Kafka; the in-process polling worker of the original brief | The outbox row stays the truth for every event; the relay never sleeps on a full batch; delivery scales with consumer instances. Broker on `5672`, UI on `15672`, `guest`/`guest` in development. |
+| **Redis** holds hot state: the shared catalogue cache (Task 13), the stock admission gate and the idempotency fast path (Task 14) | Nothing — every request hit SQL Server | Redis may answer 409 or a 200 replay on its own; it may **never** answer 201. Every success still runs the conditional `UPDATE` and the unique-index insert. Redis down = gate open, cache miss, not an outage. |
+| **One SQL Server, no sharding** | Sharded order storage | The database remains the only source of truth for stock and orders (`CLAUDE.md` rule 3). Hot-product throughput is bounded by the row lock hold time, which Task 12 minimises and measures. Moving the counter itself into Redis or into stock buckets is design-only (design note §5). |
+| **Synchronous 201/409 kept** | 202 Accepted + asynchronous intake | The brief and Task 8's tests require the 409 to be the response. Bursts are absorbed by fast rejection (gate, rate limiter) rather than by queueing orders. |
+
 ## Assumptions
 
 ### Task 1 — foundation
@@ -118,3 +130,69 @@ All three were owner instructions; every spec under `docs/` is written for this 
   `DbContext` from the real DI graph.
 - **`Product` has no stock methods.** Deduct/restore are conditional `UPDATE`s in the database
   (Tasks 4 and 6), never in-memory mutations, so the entity deliberately exposes none.
+
+### Task 3 — read side
+
+- **Built together with Task 4, without test code** (owner instruction: "skip write test code").
+  The `Integration test:` boxes in both task files are therefore left unticked and belong to Task
+  8's harness; every other box was verified by hand against the compose database.
+- **Repository interfaces live next to their feature**, not in `Abstractions/`:
+  `Features/Products/{IProductQueryRepository,IProductRepository,IStockRepository}.cs` and
+  `Features/Orders/{IOrderQueryRepository,IOrderRepository}.cs`. `Abstractions/` stays for
+  cross-cutting plumbing; Infrastructure implements the feature interfaces (`Read/` for Dapper,
+  `Persistence/` for EF).
+- **Dapper materialises the positional DTO records through their constructor**, so every read
+  query aliases its columns to the record's parameter names *in parameter order*
+  (`available_quantity AS AvailableQuantity`). `MatchNamesWithUnderscores` from Task 1 stays on
+  but is not relied upon.
+- **`notificationStatus` vocabulary** is `Pending` (outbox `Pending` or `Processing`), `Sent`,
+  `Failed`, mapped once in `NotificationStatus.FromOutbox` (Application). `None` is only
+  reachable for an order without an `order.created` row, which the create path never produces.
+- **`DispatcherTests` no longer sets `ValidateOnBuild`.** Its container is `AddApplication()`
+  plus fakes for the pipeline; from Task 3 on `AddApplication()` registers real handlers whose
+  repositories are Infrastructure types, so eager validation of that partial graph can never
+  pass. The assertions are unchanged, handlers still resolve per `Send`, and the full graph is
+  validated by the host in `ApiSmokeTests`.
+
+### Task 4 — create order
+
+- **`Idempotency-Key` is validated here, stored in Task 5.** The header is bound in the
+  endpoint, carried on `CreateOrderCommand.IdempotencyKey`, and rejected with 400 when missing or
+  not GUID-shaped (`Guid.TryParse`) / ULID-shaped (26 Crockford base32 characters). The validation
+  error is keyed `Idempotency-Key`, not the property name.
+- **Duplicate product codes are rejected, not merged** (400, `Lines`). Two codes count as the
+  same when they differ only by letter case or trailing whitespace — that is how SQL Server's
+  default collation matches `products.code`, so being stricter in C# would let a request reach the
+  database as one product with two lines. The handler also uses the catalogue's spelling of the
+  code on the stored line (`sku-001` is stored as `SKU-001`) and trims the customer reference.
+- **The 201 body is built in memory from the aggregate**, not re-read through the Task 3 query:
+  a Dapper read on a second connection would block on the transaction's own uncommitted rows.
+  It carries `notificationStatus: "Pending"` / `notificationAttempts: 0`, which is exactly what
+  `GET /api/orders/{id}` reports until the worker runs. Task 5's replay path is the one that loads
+  through the read query.
+- **Lock order is the database's, not C#'s.** `IProductRepository.GetByCodesAsync` returns rows
+  `ORDER BY code` and the handler deducts in that order, so create/create and (Task 6)
+  create/cancel take product row locks in the same collation order and cannot deadlock. Sorting in
+  C# with an ordinal comparer could disagree with the collation for non-ASCII codes.
+- **`available` in the 409 body is a second read** after the conditional `UPDATE` affected zero
+  rows, so it is the committed value at that moment, not a pre-update snapshot. Structured error
+  data travels on `Error.Details` (Domain) and `ResultExtensions` copies it into ProblemDetails
+  `extensions` generically, so the HTTP mapping stays the single place it was.
+- **`OutboxMessage` is an Application type** (`Abstractions/Outbox/`) mapped by EF in
+  Infrastructure; the handler stages it through `IOutbox.Enqueue` and it is written by the same
+  `SaveChanges` as the order. Payloads are camelCase JSON with `long`s as strings —
+  `LongAsStringJsonConverter` moved from `Api` to `Application/Abstractions/Serialization` so the
+  API and the outbox share it. `OrderCreated` (Application) is the payload record Task 7 will
+  deserialize.
+- **`outbox_messages.attempt_count` has an unnamed default constraint.** EF Core 9 cannot name
+  default constraints, so the spec's `df_outbox_attempts` is the only DDL name not reproduced;
+  the application always writes `0` explicitly anyway.
+- **Unreadable bodies are 400 ProblemDetails, not 500.** Minimal APIs throw
+  `BadHttpRequestException` for malformed JSON or a missing body when `ThrowOnBadRequest` is on
+  (the Development default) and write an empty 4xx otherwise; `ExceptionHandlingMiddleware` now
+  maps that exception to a ProblemDetails with the framework's status code so both environments
+  answer the same way. Found during the manual review of this task, since it is the first
+  endpoint that binds a body.
+- **Filtered indexes need `QUOTED_IDENTIFIER ON` for DML.** SqlClient (EF, Dapper) sessions
+  have it on by default, so the app and tests are unaffected — but a raw `sqlcmd` session must be
+  started with `-I` or any `DELETE`/`UPDATE` on `outbox_messages` fails with error 1934.

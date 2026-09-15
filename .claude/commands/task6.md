@@ -11,7 +11,7 @@ Read, in this order:
 
 Then implement it completely.
 
-**Focus:** Guarded UPDATE ... WHERE status='Confirmed' is the lock. Never decide in C# then save.
+**Focus:** Guarded `UPDATE ... WHERE status='Confirmed'` is the lock. Never decide in C# then save. Restores run last before commit; leave the Task 13/14 `OnCommitted` seams as comments.
 
 ### How to work
 

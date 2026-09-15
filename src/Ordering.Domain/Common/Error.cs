@@ -15,7 +15,16 @@ public enum ErrorType
 /// </summary>
 public record Error(string Code, string Message, ErrorType Type)
 {
+    private static readonly IReadOnlyDictionary<string, object?> NoDetails = new Dictionary<string, object?>();
+
     public static readonly Error None = new(string.Empty, string.Empty, ErrorType.Failure);
+
+    /// <summary>
+    /// Structured facts a client can act on (for <c>stock.insufficient</c>: which product and how
+    /// many units are left). The API copies them into the ProblemDetails extensions next to
+    /// <c>code</c>. A computed property, so it takes no part in record equality.
+    /// </summary>
+    public virtual IReadOnlyDictionary<string, object?> Details => NoDetails;
 
     public static Error Validation(string code, string message) => new(code, message, ErrorType.Validation);
 

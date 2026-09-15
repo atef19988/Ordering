@@ -1,5 +1,5 @@
 ---
-description: Task 10 — Angular order form, lookup, cancel, status
+description: Task 10 — Angular order form, lookup, cancel, live status
 ---
 
 ## Task 10
@@ -11,7 +11,7 @@ Read, in this order:
 
 Then implement it completely.
 
-**Focus:** Idempotency key policy is the graded detail. Render every error state listed in the spec.
+**Focus:** Idempotency key policy is the graded detail — every 503 retries with the same key after `Retry-After`. Live status comes from the SSE stream, never polling while connected. Render every state in the spec.
 
 ### How to work
 

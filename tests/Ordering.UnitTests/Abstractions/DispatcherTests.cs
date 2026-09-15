@@ -113,8 +113,11 @@ public class DispatcherTests
         services.AddSingleton<IClock, FakeClock>();
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
 
+        // No ValidateOnBuild: AddApplication registers every real handler, whose repositories live in
+        // Infrastructure and are deliberately absent here. Handlers resolve lazily per Send, so the
+        // fakes above are still checked; the full graph is validated by the host in ApiSmokeTests.
         var scope = services
-            .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true })
+            .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true })
             .CreateScope();
 
         return (scope.ServiceProvider.GetRequiredService<IDispatcher>(), scope.ServiceProvider.GetRequiredService<CallLog>());

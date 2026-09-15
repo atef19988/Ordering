@@ -11,7 +11,7 @@ Read, in this order:
 
 Then implement it completely.
 
-**Focus:** Write from the finished code. One page means one page. Include the AI use disclosure.
+**Focus:** Write from the finished code and from `docs/capacity.md`. One page means one page — five sections. Include the AI use disclosure.
 
 ### How to work
 

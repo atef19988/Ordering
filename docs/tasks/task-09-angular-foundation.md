@@ -12,7 +12,8 @@ web/order-console/src/app/
     config/app.config.ts           environment + apiBaseUrl
   lib/
     api/base-api.service.ts        get/post<T>, unwraps data, throws ApiError
-    api/api-error.ts              code, message, status, extensions
+    api/api-error.ts              code, message, status, extensions, retryAfterSeconds (from Retry-After)
+    api/base-event-stream.ts       EventSource wrapper as a signal: data/connected/error, reconnects, stops on `done`
     forms/base-form.component.ts   loading/error/submitted signals, markAllAsTouched, errorFor()
     state/base-resource.ts         signal wrapper: data/loading/error + reload()
     ui/                            ui-button, ui-field, ui-table, ui-badge, ui-status-band,
@@ -34,8 +35,27 @@ export abstract class BaseApiService {
 ```
 
 Feature services extend it and only declare routes. HTTP error → `ApiError` happens once, in the
-interceptor, by reading ProblemDetails `code` + `extensions`. No component ever sees an
-`HttpErrorResponse`.
+interceptor, by reading ProblemDetails `code` + `extensions` and the `Retry-After` header. No
+component ever sees an `HttpErrorResponse`. `ApiError.isRetryableWithSameKey` is true for
+network errors, timeouts, and every `503` (`stock.busy`, `server.busy`, `server.timeout`) plus
+`409 idempotency.in_progress` — Task 10's retry button keys off that one flag.
+
+## `BaseEventStream<T>`
+
+```ts
+export abstract class BaseEventStream<T> {
+  readonly data = signal<T | null>(null);
+  readonly connected = signal(false);
+  readonly error = signal<ApiError | null>(null);
+  protected open(path: string, event: string): void   // new EventSource(base + path); parses `data` JSON as T on `event`
+  close(): void
+}
+```
+
+Reconnects are the browser's (`EventSource` does it); a `done` event closes for good; a `503`
+on connect surfaces as `ApiError` with `sse.full` and the component falls back to a slow poll
+through `BaseResource.reload()` every 10 s. Nothing else in the app may construct an
+`EventSource`.
 
 ## `BaseFormComponent`
 
