@@ -23,6 +23,8 @@ public class ArchitectureTests
         "Microsoft.EntityFrameworkCore",
         "Microsoft.Data.SqlClient",
         "Dapper",
+        "RabbitMQ.Client",
+        "StackExchange.Redis",
     ];
 
     [Fact]
@@ -34,7 +36,7 @@ public class ArchitectureTests
     }
 
     [Fact]
-    public void Application_references_no_EF_SqlClient_or_Dapper()
+    public void Application_references_no_EF_SqlClient_Dapper_RabbitMQ_or_Redis()
     {
         var references = ReferencesOf(typeof(Result).Assembly);
 

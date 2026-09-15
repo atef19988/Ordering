@@ -7,7 +7,8 @@ namespace Ordering.Application.Abstractions.Outbox;
 /// One row of <c>outbox_messages</c>: an integration event written in the same transaction as the
 /// change it announces. <see cref="Id"/> is a Snowflake assigned before insert, so it is the stable
 /// event id a consumer can deduplicate on across retries. This type only creates the pending row;
-/// claiming, attempts and backoff are the worker's business (Task 7) and happen in SQL.
+/// claiming, publishing, attempts and verdicts are the relay's and consumer's business (Task 7)
+/// and happen in single-statement SQL (<c>Infrastructure/Outbox/OutboxStore</c>).
 /// </summary>
 public sealed class OutboxMessage
 {
@@ -55,6 +56,9 @@ public sealed class OutboxMessage
     public string? ClaimedBy { get; private set; }
 
     public DateTimeOffset? ClaimedUntil { get; private set; }
+
+    /// <summary>Set by the relay once the broker confirmed the message; cleared only by the reaper.</summary>
+    public DateTimeOffset? PublishedAt { get; private set; }
 
     public DateTimeOffset? ProcessedAt { get; private set; }
 

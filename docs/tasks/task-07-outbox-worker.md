@@ -175,11 +175,25 @@ equals the consumer's count.
 
 ## Definition of done
 
-- [ ] `FailFirstN: 2` → message is retried and eventually `Sent`; `attempt_count` is 3
-- [ ] `AlwaysFail` → after `MaxAttempts` the row is `Failed` and the API reports `Failed`
-- [ ] Retry tiers grow: `next_attempt_at` deltas across attempts are ≈ 200, 400, 800, 1600 ms with the defaults (controllable `IClock`)
-- [ ] Restart test: messages created while both services are down are delivered after they start
-- [ ] Two relays and two consumers against one database and broker → every message `Sent` exactly once, `attempt_count = 1`
-- [ ] 1,000 `Pending` rows are all `published_at` within 5 s of the relay starting (no sleep between full batches)
-- [ ] An unparseable message lands in `notifications.dead` and the consumer keeps going
-- [ ] Reaper: a row left `Processing` with an expired lease and no `published_at` is re-claimed and delivered
+- [x] `FailFirstN: 2` → message is retried and eventually `Sent`; `attempt_count` is 3
+- [x] `AlwaysFail` → after `MaxAttempts` the row is `Failed` and the API reports `Failed`
+- [x] Retry tiers grow: `next_attempt_at` deltas across attempts are ≈ 200, 400, 800, 1600 ms with the defaults (controllable `IClock`)
+- [x] Restart test: messages created while both services are down are delivered after they start
+- [x] Two relays and two consumers against one database and broker → every message `Sent` exactly once, `attempt_count = 1`
+- [x] 1,000 `Pending` rows are all `published_at` within 5 s of the relay starting (no sleep between full batches)
+- [x] An unparseable message lands in `notifications.dead` and the consumer keeps going
+- [x] Reaper: a row left `Processing` with an expired lease and no `published_at` is re-claimed and delivered
+
+> Built without test code (owner instruction: "skip test"); the automated versions of these
+> boxes belong to Task 8's harness (`RabbitMqFixture`, the `Notifications:*:Enabled` switches
+> are in place). Each box was verified by hand against the compose stack (README, Task 7
+> assumptions): `FailFirstN` → `GET` reports `Sent` / `notificationAttempts: 3`, log shows
+> attempts 1–2 failing with 200 / 400 ms tiers; `AlwaysFail` → `Failed` / 5 attempts, tiers
+> 200, 400, 800, 1600 ms, `last_error` kept, API reports `Failed`; 1,000 rows inserted while
+> the API was down → all published 1.9 s after the relay started and all `Sent` with
+> `attempt_count = 1`; the same 1,000 rows with two hosts (`WorkerId` 1 and 2) → both relays
+> claimed batches, deliveries split 425 / 575, 1,000 × `Sent`, zero rows with
+> `attempt_count > 1`; a `message_id: not-a-number` / `garbage` body published on
+> `ordering.events` → `notifications.dead` (`x-death.reason = rejected`) and the next message
+> was delivered; a hand-inserted `Processing` row with `claimed_until` five minutes past and no
+> `published_at` → reaped, published and `Sent` within one reaper interval.

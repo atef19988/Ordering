@@ -25,7 +25,9 @@ builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
     options.MapType<long>(() => new OpenApiSchema { Type = JsonSchemaType.String, Format = "int64" }));
-builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("database")
+    .AddCheck<RabbitMqHealthCheck>("rabbitmq");
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);

@@ -5,20 +5,27 @@ using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Ordering.Infrastructure.Notifications;
+using Ordering.Infrastructure.Outbox;
 
 namespace Ordering.IntegrationTests.Api;
 
 /// <summary>
 /// Proves the host composes: DI graph valid, middleware, JSON contract and Swagger wired. Needs no
-/// database, so startup migration/seeding (on in Development) is switched off here.
+/// database and no broker, so startup migration/seeding (on in Development), the outbox relay and
+/// the notification consumer are switched off here.
 /// Task 8 replaces the raw factory with OrderingApiFactory + a Testcontainers SQL Server.
 /// </summary>
 public class ApiSmokeTests(ApiSmokeTests.HostWithoutDatabaseInitialization factory) : IClassFixture<ApiSmokeTests.HostWithoutDatabaseInitialization>
 {
     public sealed class HostWithoutDatabaseInitialization : WebApplicationFactory<Program>
     {
-        protected override void ConfigureWebHost(IWebHostBuilder builder) =>
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
             builder.UseSetting(Ordering.Infrastructure.DependencyInjection.InitializeOnStartupKey, "false");
+            builder.UseSetting($"{RelayOptions.SectionName}:{nameof(RelayOptions.Enabled)}", "false");
+            builder.UseSetting($"{ConsumerOptions.SectionName}:{nameof(ConsumerOptions.Enabled)}", "false");
+        }
     }
 
     [Fact]

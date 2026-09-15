@@ -11,14 +11,18 @@ decisions; `docs/tasks/` is the build plan.
 ## Getting started
 
 ```bash
-docker compose up -d                  # SQL Server 2022 on localhost:1433; db-init creates the Ordering database
+docker compose up -d                  # SQL Server 2022 on :1433 (db-init creates Ordering); RabbitMQ 4 on :5672, management UI on :15672 (guest/guest, development only)
 dotnet tool restore                   # pins dotnet-ef 9.0.x (.config/dotnet-tools.json)
 dotnet ef database update -p src/Ordering.Infrastructure -s src/Ordering.Api   # apply migrations
 dotnet run --project src/Ordering.Api -- seed   # migrate + seed the two products, then exit
 dotnet build                          # net9.0, warnings as errors
 dotnet test                           # unit tests + integration tests on a Testcontainers SQL Server (needs Docker)
-dotnet run --project src/Ordering.Api # https://localhost:5001 — /health, /swagger; Development also migrates + seeds on startup
+dotnet run --project src/Ordering.Api # https://localhost:5001 — /health (database + RabbitMQ), /swagger; Development also migrates + seeds on startup
 ```
+
+Notification delivery is simulated; switch the failure mode without editing files, e.g.
+`Notifications__Delivery__FailureMode=FailFirstN dotnet run --project src/Ordering.Api`
+(`None | AlwaysFail | FailFirstN | Random`, see `appsettings.json`).
 
 The API connection string lives in `src/Ordering.Api/appsettings.json` and matches the compose
 credentials (`sa` / `Ordering!Passw0rd`). Development-only; there is no auth in scope.
@@ -307,3 +311,91 @@ Tasks 12–14). The brief's hard rules are unchanged; these say where throughput
   row is neither removed nor changed. If it is still `Pending` when the order is cancelled, the
   relay (Task 7) still publishes it and the consumer still delivers it — the created event really
   did happen. The cancel response and `GET` simply keep reporting whatever that row's status is.
+
+### Task 7 — outbox relay, RabbitMQ, notification consumers
+
+- **Built without test code** (owner instruction: "skip test"). Every Definition-of-done box
+  was verified by hand against the compose stack (see the note under the task's boxes); the
+  automated versions belong to Task 8's harness, which the spec already assigns the
+  `RabbitMqFixture`, the `Notifications:Relay:Enabled` / `Notifications:Consumer:Enabled`
+  switches (added now, both `true` by default) and `ResetAsync`. The existing test hosts
+  (`OrderingApiFactory`, the smoke host) set both switches to `false`: they have no broker,
+  and the Task 1–6 tests assert on outbox rows the relay would otherwise claim.
+- **`RabbitMQ.Client` 7.2.2**, the async `IChannel` API; `Testcontainers.RabbitMq` 4.15.0 is
+  pinned next to `Testcontainers.MsSql` for Task 8. `Microsoft.Extensions.Hosting.Abstractions`
+  gives Infrastructure `BackgroundService`.
+- **Only `Infrastructure/Messaging` sees RabbitMQ.** `RabbitMqConnection` (one `IConnection`
+  per process, opened lazily so the host starts without the broker, automatic + topology
+  recovery on, `ClientProvidedName = ordering-api/{Snowflake:WorkerId}`), `RabbitMqTopology`
+  (names and the idempotent declares), `RabbitMqEventPublisher` (`IEventPublisher`, the relay's
+  channel) and `RabbitMqNotificationQueue` (the consumer's channel: prefetch, manual acks, the
+  retry re-publish). The consumer in `Infrastructure/Notifications` works with an
+  `InboundMessage` record (`MessageId`, `Type`, `x-aggregate-id`, body bytes) and answers
+  `Ack | Dead`; it never touches a channel or a queue name, which is what the `CLAUDE.md`
+  boundary asks for. The architecture test now also forbids `RabbitMQ.Client` and
+  `StackExchange.Redis` in Application.
+- **Seams `Application` sees.** `Abstractions/Messaging/IEventPublisher.PublishAsync(
+  IntegrationEvent, ct)` — `IntegrationEvent(Id, Type, AggregateId, Payload)` is the claimed
+  row's projection, since the EF `OutboxMessage` cannot be materialised by Dapper — and
+  `Notifications/INotificationDeliveryService.SendAsync(eventId, attempt, customerReference,
+  total, ct)` returning `DeliveryResult(Succeeded, Error)`.
+- **Outbox bookkeeping is not a command.** `Infrastructure/Outbox/OutboxStore` runs one
+  parameterised, autocommitted T-SQL statement per call on its own connection (it derives from
+  `BaseDapperRepository` for the connection plumbing, nothing else): claim, publish mark,
+  release, reap, attempt count, `Sent`, retry, `Failed`. No transaction, no EF entity, no
+  `IDispatcher`, no pipeline behaviours. Every `@now` comes from `IClock` — including the claim's
+  `next_attempt_at <= @now` and `claimed_until = @now + lease`, where the spec shows
+  `SYSDATETIMEOFFSET()` — so a test with a controllable clock steers the whole table.
+- **The relay publishes a batch concurrently, then marks it in one statement.** Per-row
+  publish → confirm → `UPDATE` cost two network round trips per message and measured ~25
+  messages/s through Docker Desktop. The relay now awaits all publishes of a claim together on
+  its one confirmed channel (confirms pipeline; `IChannel` is safe for concurrent publishing in
+  7.x), then runs `UPDATE … SET published_at … WHERE id IN @ids` once and releases the failures
+  once — 1,000 `Pending` rows are published in ≈1.9 s from a cold start (all 1,000 `Sent`,
+  `attempt_count = 1`; the same with two relays and two consumers on one database and broker).
+  The trade-off: a relay that dies between the confirms and the mark leaves up to one batch
+  (200 rows) for the reaper to re-publish instead of one row — duplicates the consumer's guard
+  absorbs, and at-least-once either way.
+- **The publish mark is guarded by `published_at IS NULL`, not by `status = 'Processing'`.**
+  With a local broker the consumer regularly delivers and writes `Sent` *before* the relay's
+  mark runs; the spec's status guard then skips the row, leaving `Sent` rows with
+  `published_at NULL` and the lease columns still set (808 of 1,000 in the first measurement).
+  A row the broker confirmed was published whatever its verdict, so the mark now depends only
+  on not having been marked yet, and the consumer's `Sent`/`Failed` writes also clear
+  `claimed_by`/`claimed_until`. The row-state table in the spec holds as written.
+- **Retry tiers and the reaper.** `next_attempt_at` is written by the consumer as
+  `IClock.UtcNow + min(BaseBackoffMs × 2^(attempt−1), MaxBackoffMs)` — 200, 400, 800, 1600 ms
+  with the defaults — and the same value is each tier queue's `x-message-ttl`. There is no
+  jitter: tiers are fixed queues, one per attempt, because RabbitMQ expires only from the head
+  of a queue. The consumer also refreshes `published_at` when it schedules a retry, so the
+  reaper's `PublishedTimeoutSeconds` counts from the latest re-publish rather than the first;
+  with the defaults a message spends at most ≈3 s in tiers, far below the 300 s timeout.
+  Changing `MaxAttempts`, `BaseBackoffMs` or `MaxBackoffMs` changes the tier queues' arguments,
+  and RabbitMQ refuses a re-declare with different arguments (406 `PRECONDITION_FAILED`): delete
+  the `notifications.retry.a*` queues in the management UI first. The relay reaps once at
+  startup, then every `ReaperIntervalSeconds`.
+- **Broker down.** The relay releases the claimed batch to `Pending` and waits 5 s before the
+  next claim; the consumer reconnects every 5 s; `/health` reports `Unhealthy`. Nothing is lost:
+  rows stay in the table and go out in `occurred_at` order on the next successful claim. A
+  handler exception inside the consumer (typically the database being unreachable *after* the
+  message arrived) is logged, waited out for 2 s and NACKed with requeue — the attempt statement
+  either ran or did not, so the redelivery is safe.
+- **At-least-once, written down.** The delivery call always receives `outbox_messages.id` — a
+  Snowflake assigned before the row was inserted, carried as the AMQP `MessageId` and identical
+  across retries, tiers and re-publishes — so a real `INotificationDeliveryService` can
+  deduplicate on it. Cases where the same id is delivered twice: (1) the consumer dies after
+  `SendAsync` succeeded and before `Sent` is written → the broker redelivers → the attempt is
+  counted again and the notification is sent again; (2) the consumer dies between the retry
+  re-publish and the ACK of the original → both copies arrive → one extra attempt, still
+  bounded by `MaxAttempts`; (3) the relay dies between the broker's confirm and the publish
+  mark, or a verdict never arrives within `PublishedTimeoutSeconds` → the reaper re-publishes →
+  a second copy, acknowledged without sending if the verdict did arrive meanwhile
+  (`attempt_count += 1 … WHERE status = 'Processing'` returns no row). `FailFirstN` is
+  deterministic across all of these because the attempt number comes from the row, not from
+  the fake.
+- **Serilog drops any log template with an `{EventId}` placeholder** — its MEL provider adds
+  its own `EventId` property to every event, the duplicate makes the write throw, and the
+  provider swallows it. Found because the consumer worked but logged nothing; every outbox log
+  line now uses `{OutboxEventId}`.
+- **Cancelled orders are still notified** (Task 6 decision, unchanged): the `order.created`
+  row is published and delivered regardless of the order's later status.

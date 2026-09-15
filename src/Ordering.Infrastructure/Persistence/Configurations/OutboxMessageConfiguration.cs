@@ -24,6 +24,7 @@ internal sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outb
         builder.Property(m => m.NextAttemptAt).HasColumnName("next_attempt_at").HasColumnType("datetimeoffset");
         builder.Property(m => m.ClaimedBy).HasColumnName("claimed_by").HasMaxLength(OutboxMessage.ClaimedByMaxLength);
         builder.Property(m => m.ClaimedUntil).HasColumnName("claimed_until").HasColumnType("datetimeoffset");
+        builder.Property(m => m.PublishedAt).HasColumnName("published_at").HasColumnType("datetimeoffset");
         builder.Property(m => m.ProcessedAt).HasColumnName("processed_at").HasColumnType("datetimeoffset");
         builder.Property(m => m.LastError).HasColumnName("last_error").HasMaxLength(OutboxMessage.LastErrorMaxLength);
 
@@ -33,7 +34,7 @@ internal sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outb
             .HasDatabaseName("ux_outbox_order_created")
             .HasFilter($"[type] = '{OrderCreated.EventType}'");
 
-        // What the Task 7 worker's claim query scans: due rows that are not yet Sent/Failed.
+        // What the relay's claim and the reaper scan: due rows that are not yet Sent/Failed.
         builder.HasIndex(m => new { m.Status, m.NextAttemptAt })
             .HasDatabaseName("ix_outbox_due")
             .HasFilter($"[status] IN ('{nameof(OutboxMessageStatus.Pending)}', '{nameof(OutboxMessageStatus.Processing)}')");
