@@ -1,3 +1,4 @@
+using System.Globalization;
 using Ordering.Application.Abstractions;
 using Ordering.Domain.Common;
 
@@ -27,7 +28,7 @@ public static class ResultExtensions
             extensions[key] = value;
         }
 
-        return error switch
+        IResult problem = error switch
         {
             ValidationError validation => TypedResults.ValidationProblem(
                 new Dictionary<string, string[]>(validation.Errors),
@@ -39,6 +40,11 @@ public static class ResultExtensions
                 statusCode: StatusCodeOf(error.Type),
                 extensions: extensions),
         };
+
+        // A retryable failure tells the client when to come back, whatever its status code.
+        return error.Details.TryGetValue(Error.RetryAfterSecondsKey, out var retryAfter) && retryAfter is int seconds
+            ? new WithRetryAfter(problem, seconds)
+            : problem;
     }
 
     private static int StatusCodeOf(ErrorType type) => type switch
@@ -46,6 +52,21 @@ public static class ResultExtensions
         ErrorType.Validation => StatusCodes.Status400BadRequest,
         ErrorType.NotFound => StatusCodes.Status404NotFound,
         ErrorType.Conflict => StatusCodes.Status409Conflict,
+        ErrorType.Unavailable => StatusCodes.Status503ServiceUnavailable,
         _ => StatusCodes.Status500InternalServerError,
     };
+
+    /// <summary>Adds <c>Retry-After: &lt;seconds&gt;</c> to an otherwise unchanged problem response.</summary>
+    public sealed class WithRetryAfter(IResult inner, int seconds) : IResult
+    {
+        public IResult Inner { get; } = inner;
+
+        public int Seconds { get; } = seconds;
+
+        public Task ExecuteAsync(HttpContext httpContext)
+        {
+            httpContext.Response.Headers.RetryAfter = Seconds.ToString(CultureInfo.InvariantCulture);
+            return Inner.ExecuteAsync(httpContext);
+        }
+    }
 }

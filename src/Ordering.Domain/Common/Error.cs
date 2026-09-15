@@ -6,6 +6,9 @@ public enum ErrorType
     NotFound,
     Conflict,
     Failure,
+
+    /// <summary>Nothing is wrong with the request; the service could not serve it right now. Safe to retry.</summary>
+    Unavailable,
 }
 
 /// <summary>
@@ -15,6 +18,11 @@ public enum ErrorType
 /// </summary>
 public record Error(string Code, string Message, ErrorType Type)
 {
+    /// <summary>
+    /// <see cref="Details"/> key whose <c>int</c> value the API turns into a <c>Retry-After</c> header.
+    /// </summary>
+    public const string RetryAfterSecondsKey = "retryAfterSeconds";
+
     private static readonly IReadOnlyDictionary<string, object?> NoDetails = new Dictionary<string, object?>();
 
     public static readonly Error None = new(string.Empty, string.Empty, ErrorType.Failure);
@@ -33,4 +41,6 @@ public record Error(string Code, string Message, ErrorType Type)
     public static Error Conflict(string code, string message) => new(code, message, ErrorType.Conflict);
 
     public static Error Failure(string code, string message) => new(code, message, ErrorType.Failure);
+
+    public static Error Unavailable(string code, string message) => new(code, message, ErrorType.Unavailable);
 }

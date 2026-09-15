@@ -128,11 +128,18 @@ before anything is written.
 
 ## Definition of done
 
-- [ ] Same key + same payload (different JSON key order / extra whitespace) → 200, same order id, stock deducted once
-- [ ] Same key + changed quantity → 409 `idempotency.key_reuse`, zero new rows in orders/order_lines/outbox
-- [ ] 20 concurrent requests, same key, same payload → exactly one order, one deduction, one `order.created` outbox row
-- [ ] Missing `Idempotency-Key` → 400
-- [ ] Cancel then replay → 200 with `Cancelled`, stock not deducted again
-- [ ] Stock conflict does not consume the key: 409, then restock, then the same key → 201
-- [ ] A test connection holding an exclusive lock on the product row → `503 stock.busy` with `Retry-After: 1` after ~3 s, and no order row
-- [ ] SQL log (or EF command interceptor) shows the `UPDATE products` as the last statement before `COMMIT`
+- [x] Same key + same payload (different JSON key order / extra whitespace) → 200, same order id, stock deducted once
+- [x] Same key + changed quantity → 409 `idempotency.key_reuse`, zero new rows in orders/order_lines/outbox
+- [x] 20 concurrent requests, same key, same payload → exactly one order, one deduction, one `order.created` outbox row
+- [x] Missing `Idempotency-Key` → 400
+- [x] Cancel then replay → 200 with `Cancelled`, stock not deducted again
+- [x] Stock conflict does not consume the key: 409, then restock, then the same key → 201
+- [x] A test connection holding an exclusive lock on the product row → `503 stock.busy` with `Retry-After: 1` after ~3 s, and no order row
+- [x] SQL log (or EF command interceptor) shows the `UPDATE products` as the last statement before `COMMIT`
+
+> Tests: `tests/Ordering.IntegrationTests/Api/IdempotencyTests.cs` (one per box, through the real
+> host on the Testcontainers SQL Server) and `tests/Ordering.UnitTests/Idempotency/RequestFingerprintTests.cs`.
+> The "cancel then replay" box applies the guarded cancel `UPDATE` by hand until Task 6 adds the
+> endpoint; the lock-timeout box holds an update lock (`UPDLOCK`) rather than an exclusive one
+> because, until Task 12 turns on RCSI, an exclusive lock stalls the catalogue read before the
+> stock statement is reached (README, Task 5 assumptions).

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Ordering.Application.Abstractions.Outbox;
+using Ordering.Application.Idempotency;
 using Ordering.Domain.Orders;
 using Ordering.Domain.Products;
 
@@ -17,6 +18,8 @@ public sealed class OrderingDbContext(DbContextOptions<OrderingDbContext> option
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
 
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
+    public DbSet<IdempotencyKey> IdempotencyKeys => Set<IdempotencyKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder) =>
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(OrderingDbContext).Assembly);

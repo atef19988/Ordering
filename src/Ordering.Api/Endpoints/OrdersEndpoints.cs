@@ -25,14 +25,19 @@ public static class OrdersEndpoints
             {
                 var result = await dispatcher.Send(request.ToCommand(idempotencyKey), cancellationToken);
 
-                // Task 5: a replay of a known key answers 200 OK with the stored order instead of 201.
-                return result.ToHttpResult(order => TypedResults.Created($"/api/orders/{order.Id}", order));
+                // The one branch this endpoint has, and it is on a result flag: a replay of a known
+                // key answers 200 OK with the stored order (in its current state) instead of 201.
+                return result.ToHttpResult(response => response.Replayed
+                    ? TypedResults.Ok(response.Order)
+                    : TypedResults.Created($"/api/orders/{response.Order.Id}", response.Order));
             })
             .WithName("CreateOrder")
             .Produces<OrderDetailDto>(StatusCodes.Status201Created)
+            .Produces<OrderDetailDto>(StatusCodes.Status200OK)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status409Conflict);
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // Task 6: POST /{id:long}/cancel
 

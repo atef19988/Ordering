@@ -1,4 +1,7 @@
+using System.Globalization;
+using Microsoft.EntityFrameworkCore;
 using Ordering.Application.Abstractions;
+using Ordering.Application.Idempotency;
 
 namespace Ordering.Infrastructure.Persistence;
 
@@ -12,6 +15,17 @@ public sealed class UnitOfWork(OrderingDbContext context) : IUnitOfWork
     public async Task BeginTransactionAsync(CancellationToken cancellationToken) =>
         await context.Database.BeginTransactionAsync(cancellationToken);
 
+    /// <summary>
+    /// <c>SET LOCK_TIMEOUT</c> is connection-scoped and pooled connections are reset between
+    /// uses, so it is issued on the transaction's own connection every time.
+    /// </summary>
+    public Task SetLockTimeoutAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        // SET takes a literal, not a parameter; the value is an integer we formatted ourselves.
+        var milliseconds = ((long)timeout.TotalMilliseconds).ToString(CultureInfo.InvariantCulture);
+        return context.Database.ExecuteSqlRawAsync("SET LOCK_TIMEOUT " + milliseconds + ";", cancellationToken);
+    }
+
     public async Task CommitAsync(CancellationToken cancellationToken)
     {
         if (context.Database.CurrentTransaction is { } transaction)
@@ -20,14 +34,33 @@ public sealed class UnitOfWork(OrderingDbContext context) : IUnitOfWork
         }
     }
 
+    /// <summary>
+    /// Also empties the change tracker: rows staged before the rollback must not be re-inserted
+    /// by the base handler's final save when the handler goes on to return a success (a replay).
+    /// </summary>
     public async Task RollbackAsync(CancellationToken cancellationToken)
     {
         if (context.Database.CurrentTransaction is { } transaction)
         {
             await transaction.RollbackAsync(cancellationToken);
         }
+
+        context.ChangeTracker.Clear();
     }
 
-    public Task<int> SaveChangesAsync(CancellationToken cancellationToken) =>
-        context.SaveChangesAsync(cancellationToken);
+    /// <summary>
+    /// The only lock the create batch can wait on is <c>pk_idempotency_keys</c> (every other key
+    /// it inserts is a fresh Snowflake), so a timeout here is reported against that table.
+    /// </summary>
+    public async Task<int> SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await context.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception exception) when (SqlErrors.TryTranslate(exception, IdempotencyKey.TableName, out var translated))
+        {
+            throw translated;
+        }
+    }
 }

@@ -3,8 +3,10 @@ using FluentValidation;
 using Ordering.Application.Abstractions;
 using Ordering.Application.Abstractions.Messaging;
 using Ordering.Application.Abstractions.Outbox;
+using Ordering.Application.Abstractions.Persistence;
 using Ordering.Application.Features.Orders.GetOrderById;
 using Ordering.Application.Features.Products;
+using Ordering.Application.Idempotency;
 using Ordering.Domain.Orders;
 using Ordering.Domain.Products;
 
@@ -22,9 +24,17 @@ public sealed record CreateOrderRequest(string CustomerReference, IReadOnlyList<
         new(idempotencyKey ?? string.Empty, CustomerReference, Lines);
 }
 
-/// <param name="IdempotencyKey">The <c>Idempotency-Key</c> header. Its shape is validated here; Task 5 stores it.</param>
+/// <param name="IdempotencyKey">The <c>Idempotency-Key</c> header; validated here, stored with the order.</param>
 public sealed record CreateOrderCommand(string IdempotencyKey, string CustomerReference, IReadOnlyList<CreateOrderLine> Lines)
-    : ICommand<OrderDetailDto>;
+    : ICommand<CreateOrderResponse>;
+
+/// <param name="Order">The order as <c>GET /api/orders/{id}</c> reports it right now.</param>
+/// <param name="Replayed">
+/// <c>true</c> when the key was already committed with an equivalent payload and nothing was
+/// written. The endpoint maps it to <c>200 OK</c> instead of <c>201 Created</c> — the only branch
+/// it is allowed to have. Task 14's admission behaviour reads the same flag.
+/// </param>
+public sealed record CreateOrderResponse(OrderDetailDto Order, bool Replayed);
 
 internal sealed partial class CreateOrderCommandValidator : AbstractValidator<CreateOrderCommand>
 {
@@ -68,9 +78,13 @@ internal sealed partial class CreateOrderCommandValidator : AbstractValidator<Cr
 }
 
 /// <summary>
-/// One transaction (opened by <c>TransactionBehavior</c>): conditional stock decrement per line,
-/// then order + lines + outbox row in one <c>SaveChanges</c>. Any failure result or exception rolls
-/// the whole thing back, so a 409 on the third line restores the first two automatically.
+/// One transaction (opened by <c>TransactionBehavior</c>, which also sets <c>LOCK_TIMEOUT</c>):
+/// catalogue read, then order + lines + outbox row + idempotency key in one <c>SaveChanges</c>,
+/// then the conditional stock decrement per line as the <b>last</b> statement before commit. A
+/// duplicate key therefore conflicts on <c>pk_idempotency_keys</c> before it touches a product
+/// row, and a hot product row is exclusively locked for one round trip plus the commit. Any
+/// failure result or exception rolls the whole thing back — including the key row, so a stock
+/// conflict never consumes the key.
 /// </summary>
 internal sealed class CreateOrderCommandHandler(
     IUnitOfWork unitOfWork,
@@ -79,15 +93,13 @@ internal sealed class CreateOrderCommandHandler(
     IProductRepository products,
     IStockRepository stock,
     IOrderRepository orders,
-    IOutbox outbox)
-    : BaseCommandHandler<CreateOrderCommand, OrderDetailDto>(unitOfWork, clock)
+    IOutbox outbox,
+    IIdempotencyStore idempotencyKeys,
+    IOrderQueryRepository orderQuery)
+    : BaseCommandHandler<CreateOrderCommand, CreateOrderResponse>(unitOfWork, clock)
 {
-    protected override async Task<Result<OrderDetailDto>> HandleCore(CreateOrderCommand command, CancellationToken cancellationToken)
+    protected override async Task<Result<CreateOrderResponse>> HandleCore(CreateOrderCommand command, CancellationToken cancellationToken)
     {
-        // Task 5: SET LOCK_TIMEOUT 3000 first, then REORDER this handler — stage order + lines + outbox
-        // + idempotency row and SaveChanges BEFORE the stock decrements, so the product row lock is
-        // held for one round trip and a duplicate key conflicts before touching stock (spec §Flow).
-
         var requested = command.Lines.ToDictionary(l => ProductCodes.Normalize(l.ProductCode), l => l.Quantity, ProductCodes.Comparer);
 
         // 1. Prices come from the catalogue, never from the request. The rows arrive in database
@@ -100,41 +112,85 @@ internal sealed class CreateOrderCommandHandler(
             return OrderErrors.UnknownProduct(unknown);
         }
 
+        // 2. Build the aggregate in memory; the domain computes the total.
         var orderId = ids.NewId();
         var now = Clock.UtcNow;
-        var lines = new List<OrderLine>(catalogue.Count);
+        var lines = catalogue
+            .Select(product => OrderLine.Create(ids.NewId(), orderId, product.Code, requested[product.Code], product.Price))
+            .ToList();
+        var order = Order.Create(orderId, command.CustomerReference.Trim(), lines, now);
 
-        foreach (var product in catalogue)
+        // 3. Stage everything that needs no product row lock: order, lines, the notification (its
+        //    Snowflake id is the stable event id) and the idempotency key.
+        orders.Add(order);
+        outbox.Enqueue(OutboxMessage.Create(ids.NewId(), OrderCreated.EventType, order.Id, new OrderCreated(order.Id, order.CustomerReference, order.Total, now), now));
+        idempotencyKeys.Add(new IdempotencyKey(command.IdempotencyKey, RequestFingerprint.Compute(command), order.Id, now));
+
+        // 4. One batch. The primary key on idempotency_keys is the idempotency check: a duplicate
+        //    that is still in flight blocks here until the first transaction ends, then conflicts.
+        try
         {
-            var quantity = requested[product.Code];
-
-            // 2. The conditional UPDATE is the whole concurrency story: zero rows affected means the
-            //    database refused because another committed order got there first.
-            if (await stock.TryDeductAsync(product.Code, quantity, cancellationToken) == 0)
-            {
-                return OrderErrors.InsufficientStock(product.Code, await stock.GetAvailableQuantityAsync(product.Code, cancellationToken));
-            }
-
-            lines.Add(OrderLine.Create(ids.NewId(), orderId, product.Code, quantity, product.Price));
+            await UnitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (UniqueViolationException exception) when (exception.ConstraintName == IdempotencyKey.PrimaryKeyConstraint)
+        {
+            await UnitOfWork.RollbackAsync(cancellationToken);
+            return await ReplayAsync(command, cancellationToken);
+        }
+        catch (LockTimeoutException exception) when (exception.Resource == IdempotencyKey.TableName)
+        {
+            return OrderErrors.IdempotencyInProgress(command.IdempotencyKey);
         }
 
-        // 3–4. The domain computes the total; EF inserts order and lines with the outbox row below.
-        var order = Order.Create(orderId, command.CustomerReference.Trim(), lines, now);
-        orders.Add(order);
+        // 5. The conditional UPDATE is the whole concurrency story: zero rows affected means the
+        //    database refused because another committed order got there first. Last before commit.
+        foreach (var line in order.Lines)
+        {
+            int deducted;
 
-        // 5. The notification is staged in the same unit of work; its Snowflake id is the stable event id.
-        outbox.Enqueue(OutboxMessage.Create(
-            ids.NewId(),
-            OrderCreated.EventType,
-            order.Id,
-            new OrderCreated(order.Id, order.CustomerReference, order.Total, now),
-            now));
+            try
+            {
+                deducted = await stock.TryDeductAsync(line.ProductCode, line.Quantity, cancellationToken);
+            }
+            catch (LockTimeoutException exception) when (exception.Resource == IStockRepository.LockedResource)
+            {
+                return OrderErrors.StockBusy(line.ProductCode);
+            }
 
-        // Task 5: the idempotency_keys row joins the SaveChanges above (same batch as the order), and a
-        // pk_idempotency_keys violation becomes the replay / key-reuse outcome (200 vs 409); a stock 409
-        // after it rolls the key row back too, so a conflict never consumes the key.
+            if (deducted == 0)
+            {
+                return OrderErrors.InsufficientStock(line.ProductCode, await stock.GetAvailableQuantityAsync(line.ProductCode, cancellationToken));
+            }
+        }
 
-        return ToDto(order);
+        // 6. Success: TransactionBehavior commits. The base class's final save has nothing left to flush.
+        return new CreateOrderResponse(ToDto(order), Replayed: false);
+    }
+
+    /// <summary>
+    /// The key is already committed. Same payload → the stored order in its <em>current</em>
+    /// state (it may be cancelled by now); different payload → 409. Runs after the rollback, on
+    /// the read side's own connections.
+    /// </summary>
+    private async Task<Result<CreateOrderResponse>> ReplayAsync(CreateOrderCommand command, CancellationToken cancellationToken)
+    {
+        var existing = await idempotencyKeys.FindAsync(command.IdempotencyKey, cancellationToken);
+
+        if (existing is null)
+        {
+            // The row we collided with is gone (its transaction ended without committing after all): retry.
+            return OrderErrors.IdempotencyInProgress(command.IdempotencyKey);
+        }
+
+        if (!string.Equals(existing.RequestHash, RequestFingerprint.Compute(command), StringComparison.Ordinal))
+        {
+            return OrderErrors.IdempotencyKeyReuse(command.IdempotencyKey);
+        }
+
+        var order = await orderQuery.GetByIdAsync(existing.OrderId, cancellationToken)
+            ?? throw new InvalidOperationException($"Idempotency key '{command.IdempotencyKey}' references order {existing.OrderId}, which does not exist.");
+
+        return new CreateOrderResponse(order, Replayed: true);
     }
 
     /// <summary>

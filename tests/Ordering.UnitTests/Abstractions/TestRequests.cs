@@ -12,6 +12,8 @@ internal sealed class FakeUnitOfWork(CallLog log) : IUnitOfWork
 {
     public Task BeginTransactionAsync(CancellationToken cancellationToken) => Record("Begin");
 
+    public Task SetLockTimeoutAsync(TimeSpan timeout, CancellationToken cancellationToken) => Record($"LockTimeout={timeout.TotalSeconds}s");
+
     public Task CommitAsync(CancellationToken cancellationToken) => Record("Commit");
 
     public Task RollbackAsync(CancellationToken cancellationToken) => Record("Rollback");

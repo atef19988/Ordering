@@ -1,3 +1,5 @@
+using Ordering.Application.Abstractions.Persistence;
+
 namespace Ordering.Application.Abstractions;
 
 /// <summary>
@@ -7,11 +9,25 @@ public interface IUnitOfWork
 {
     Task BeginTransactionAsync(CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Bounds every lock wait on the transaction's connection. Connection-scoped in SQL Server, so
+    /// it is issued inside each transaction; a wait that exceeds it surfaces as <see cref="LockTimeoutException"/>.
+    /// </summary>
+    Task SetLockTimeoutAsync(TimeSpan timeout, CancellationToken cancellationToken);
+
     /// <summary>Commits the current transaction. A no-op when none is active.</summary>
     Task CommitAsync(CancellationToken cancellationToken);
 
-    /// <summary>Rolls back the current transaction. A no-op when none is active.</summary>
+    /// <summary>
+    /// Rolls back the current transaction and forgets every staged change, so a later save flushes
+    /// nothing. A no-op when no transaction is active.
+    /// </summary>
     Task RollbackAsync(CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Flushes staged changes in one batch. Throws <see cref="UniqueViolationException"/> when a
+    /// unique key is already taken and <see cref="LockTimeoutException"/> (<c>"idempotency_keys"</c>)
+    /// when the batch waited too long for a key lock; the transaction is still open either way.
+    /// </summary>
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
 }

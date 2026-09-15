@@ -196,3 +196,71 @@ Tasks 12–14). The brief's hard rules are unchanged; these say where throughput
 - **Filtered indexes need `QUOTED_IDENTIFIER ON` for DML.** SqlClient (EF, Dapper) sessions
   have it on by default, so the app and tests are unaffected — but a raw `sqlcmd` session must be
   started with `-I` or any `DELETE`/`UPDATE` on `outbox_messages` fails with error 1934.
+
+### Task 5 — idempotency
+
+- **Payload equivalence.** `request_hash` is the SHA-256 (lower-case hex, 64 characters) of the
+  canonical form of the submission, computed by `Application/Idempotency/RequestFingerprint`:
+
+  ```
+  customerReference.Trim() + "|" + join(",", lines ordered by CODE, each "CODE:QTY")
+  where CODE = productCode.Trim().ToUpperInvariant() and QTY is the integer quantity
+  ```
+
+  Same goods, same customer, any JSON key order, whitespace or product-code casing → same hash →
+  `200 OK` replay. A changed quantity, product or customer reference → different hash →
+  `409 idempotency.key_reuse`. The customer reference is compared **case-sensitively** (`CUST-1`
+  and `cust-1` are different customers); product codes are upper-cased because the catalogue's
+  spelling is not known at hash time. The key itself, other headers and the URL play no part.
+- **The key column is case-insensitive.** `idempotency_key` is `nvarchar(128)` under the
+  database's default collation, so `abc…` and `ABC…` are the same key. GUIDs and ULIDs are not
+  case-sensitive identifiers anyway; the value is stored as received.
+- **`SET LOCK_TIMEOUT 3000` is issued by `TransactionBehavior`, not by the handler.** The spec
+  puts it as step 1 of `CreateOrder`; it is still the first statement inside the transaction
+  (`IUnitOfWork.SetLockTimeoutAsync`, called right after `BeginTransaction`), but every command
+  gets it — Task 6's cancel included — instead of each handler remembering to. Queries never see
+  it. The value is `TransactionBehavior.LockTimeout` (3 s).
+- **The handler calls `SaveChangesAsync` itself** so the batch runs *before* the stock update;
+  `BaseCommandHandler`'s final save on success then has nothing left to flush (no round trip).
+  `IUnitOfWork.RollbackAsync` also clears the EF change tracker, so after the replay path rolls
+  back, the rows staged for the duplicate cannot be re-inserted by that final save.
+- **SQL errors are translated in exactly one place** (`Infrastructure/Persistence/SqlErrors`):
+  2627/2601 → `UniqueViolationException(ConstraintName)` (name parsed from the message after the
+  number check), 1222 → `LockTimeoutException(Resource)`. The resource is named by the call site:
+  `UnitOfWork.SaveChangesAsync` reports `idempotency_keys` (the only key in the create batch that
+  can already exist — every other id is a fresh Snowflake) and `StockRepository.TryDeductAsync`
+  reports `products`. Anything else is still a 500 via `ExceptionHandlingMiddleware`.
+- **Retryable failures.** `ErrorType.Unavailable` maps to `503`. `RetryableError` carries
+  `retryAfterSeconds` on `Error.Details`, which `ResultExtensions` turns into a `Retry-After`
+  header on any status (it also stays in the ProblemDetails extensions). Used by
+  `503 stock.busy` (product row locked past the timeout, nothing committed) and
+  `409 idempotency.in_progress` (a duplicate is still inside its transaction). Both are safe to
+  retry with the same key.
+- **A replay returns the order's current state, not a snapshot of the original response.**
+  After a cancel, the replay answers `200` with `status: "Cancelled"` and never re-creates or
+  re-confirms. The replay loads through the Task 3 Dapper query on its own connection because
+  the handler asks after it has rolled back.
+- **Interceptors come from DI.** `AddDbContext` now adds every `IInterceptor` registered in the
+  host (`options.AddInterceptors(provider.GetServices<IInterceptor>())`); production registers
+  none. The test host registers `SqlStatementLog` (commands + commit/rollback, in order), which
+  is how the "stock update is the last statement before `COMMIT`" box is asserted.
+- **Until Task 12 (RCSI), an exclusive lock on a product row also blocks the catalogue read.**
+  Under plain `READ COMMITTED` the handler's `SELECT … FROM products` needs a shared lock, so a
+  writer holding the row for more than 3 s would surface as a lock timeout on that read — which
+  is not translated and would be a 500 today. The `503 stock.busy` test therefore holds an
+  **update lock** (`WITH (UPDLOCK, ROWLOCK)` in an open transaction): compatible with the
+  catalogue's shared lock, incompatible with the conditional `UPDATE`, so the request reaches the
+  stock statement, waits ~3 s and gets `503` + `Retry-After: 1` with no rows committed. Task 12
+  turns on `READ_COMMITTED_SNAPSHOT`, after which an exclusive lock behaves the same way.
+- **Test harness grew the pieces Task 5 needed.** `OrderingApiFactory` (real host on the
+  fixture's container, `Snowflake:WorkerId = 7`, Development settings so startup migrates and
+  seeds) and `SqlServerFixture.ResetAsync()` (delete `order_lines`, `idempotency_keys`,
+  `outbox_messages`, `orders`, `products`, then re-seed) exist now; Task 8 adds the RabbitMQ side
+  to both. `DbInitializerTests` start from `ResetAsync()` because the idempotency tests leave
+  orders behind on purpose (each works on a product of its own and asserts per-key/per-product).
+- **Cancel-then-replay is tested against a hand-applied cancel** (`UPDATE orders SET status =
+  'Cancelled' … WHERE status = 'Confirmed'`) until Task 6 adds the endpoint; the test carries a
+  `// Task 6:` marker.
+- **`FindAsync` returning nothing after a key collision** (the row we collided with vanished
+  before we could read it) is answered as `409 idempotency.in_progress`. It cannot happen without
+  a manual delete, but the handler must return *something* retryable rather than throw.

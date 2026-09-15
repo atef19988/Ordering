@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.DependencyInjection;
 using Ordering.Api.Endpoints;
 using Ordering.Application.Abstractions;
 using Ordering.Domain.Common;
@@ -37,6 +38,7 @@ public class ResultToHttpMappingTests
     [InlineData(ErrorType.Validation, StatusCodes.Status400BadRequest)]
     [InlineData(ErrorType.NotFound, StatusCodes.Status404NotFound)]
     [InlineData(ErrorType.Conflict, StatusCodes.Status409Conflict)]
+    [InlineData(ErrorType.Unavailable, StatusCodes.Status503ServiceUnavailable)]
     [InlineData(ErrorType.Failure, StatusCodes.Status500InternalServerError)]
     public void Failure_maps_error_type_to_status_and_exposes_the_code(ErrorType type, int expectedStatus)
     {
@@ -48,6 +50,26 @@ public class ResultToHttpMappingTests
         Assert.Equal(expectedStatus, problem.StatusCode);
         Assert.Equal("thing.code", problem.ProblemDetails.Extensions["code"]);
         Assert.Equal("Something specific.", problem.ProblemDetails.Detail);
+    }
+
+    [Theory]
+    [InlineData(ErrorType.Conflict, StatusCodes.Status409Conflict)]
+    [InlineData(ErrorType.Unavailable, StatusCodes.Status503ServiceUnavailable)]
+    public async Task Retryable_failure_adds_a_retry_after_header_on_any_status(ErrorType type, int expectedStatus)
+    {
+        var error = new RetryableError("thing.busy", "Come back later.", type, RetryAfterSeconds: 1);
+
+        var response = Result.Failure(error).ToHttpResult();
+
+        var withHeader = Assert.IsType<ResultExtensions.WithRetryAfter>(response);
+        var problem = Assert.IsType<ProblemHttpResult>(withHeader.Inner);
+        Assert.Equal(expectedStatus, problem.StatusCode);
+        Assert.Equal(1, problem.ProblemDetails.Extensions["retryAfterSeconds"]);
+
+        var httpContext = new DefaultHttpContext { RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider() };
+        await response.ExecuteAsync(httpContext);
+        Assert.Equal("1", httpContext.Response.Headers.RetryAfter);
+        Assert.Equal(expectedStatus, httpContext.Response.StatusCode);
     }
 
     [Fact]

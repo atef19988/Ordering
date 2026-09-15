@@ -1,11 +1,13 @@
 using Dapper;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Ordering.Application.Abstractions;
 using Ordering.Application.Abstractions.Outbox;
 using Ordering.Application.Features.Orders;
 using Ordering.Application.Features.Products;
+using Ordering.Application.Idempotency;
 using Ordering.Infrastructure.Common;
 using Ordering.Infrastructure.Outbox;
 using Ordering.Infrastructure.Persistence;
@@ -38,7 +40,9 @@ public static class DependencyInjection
         // snake_case columns map onto PascalCase read-model properties.
         DefaultTypeMap.MatchNamesWithUnderscores = true;
 
-        services.AddDbContext<OrderingDbContext>(options => options.UseSqlServer(connectionString));
+        // Interceptors registered by the host (tests: SQL statement log; Task 12: wait stats) ride along.
+        services.AddDbContext<OrderingDbContext>((provider, options) =>
+            options.UseSqlServer(connectionString).AddInterceptors(provider.GetServices<IInterceptor>()));
         services.AddScoped<IUnitOfWork, UnitOfWork>();
 
         // Write side: all share the scoped DbContext, hence the command's transaction.
@@ -46,6 +50,7 @@ public static class DependencyInjection
         services.AddScoped<IStockRepository, StockRepository>();
         services.AddScoped<IOrderRepository, OrderRepository>();
         services.AddScoped<IOutbox, TransactionalOutbox>();
+        services.AddScoped<IIdempotencyStore, IdempotencyStore>();
 
         // Read side: Dapper on its own connections, never inside a transaction.
         services.AddScoped<IProductQueryRepository, ProductQueryRepository>();

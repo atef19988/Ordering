@@ -6,9 +6,13 @@ namespace Ordering.Application.Features.Products;
 /// </summary>
 public interface IStockRepository
 {
+    /// <summary>The <c>LockTimeoutException.Resource</c> a stock statement reports when the product row stays locked.</summary>
+    const string LockedResource = "products";
+
     /// <summary>
     /// <c>UPDATE products SET available_quantity -= @quantity WHERE code = @code AND available_quantity >= @quantity</c>.
     /// Returns rows affected: <c>1</c> deducted, <c>0</c> insufficient stock (nothing changed).
+    /// Throws <c>LockTimeoutException</c> (<see cref="LockedResource"/>) when another writer held the row past the lock timeout.
     /// </summary>
     Task<int> TryDeductAsync(string productCode, int quantity, CancellationToken cancellationToken);
 

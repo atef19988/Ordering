@@ -19,7 +19,7 @@ public class DispatcherTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal("hi", result.Value);
-        Assert.Equal(new[] { "Begin", "Handle", "Commit" }, log);
+        Assert.Equal(new[] { "Begin", "LockTimeout=3s", "Handle", "Commit" }, log);
     }
 
     [Fact]
@@ -31,7 +31,7 @@ public class DispatcherTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("echo.refused", result.Error.Code);
-        Assert.Equal(new[] { "Begin", "Handle", "Rollback" }, log);
+        Assert.Equal(new[] { "Begin", "LockTimeout=3s", "Handle", "Rollback" }, log);
     }
 
     [Fact]
@@ -41,7 +41,7 @@ public class DispatcherTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => dispatcher.Send(new Echo("throw")));
 
-        Assert.Equal(new[] { "Begin", "Handle", "Rollback" }, log);
+        Assert.Equal(new[] { "Begin", "LockTimeout=3s", "Handle", "Rollback" }, log);
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public class DispatcherTests
         var result = await dispatcher.Send(new Touch());
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(new[] { "Begin", "Handle", "Commit" }, log);
+        Assert.Equal(new[] { "Begin", "LockTimeout=3s", "Handle", "Commit" }, log);
     }
 
     [Fact]
@@ -93,12 +93,12 @@ public class DispatcherTests
         var (dispatcher, log) = Build();
 
         await dispatcher.Send(new Store(1));
-        Assert.Equal(new[] { "Begin", "HandleCore@2026", "SaveChanges", "Commit" }, log);
+        Assert.Equal(new[] { "Begin", "LockTimeout=3s", "HandleCore@2026", "SaveChanges", "Commit" }, log);
 
         log.Clear();
 
         await dispatcher.Send(new Store(-1));
-        Assert.Equal(new[] { "Begin", "HandleCore@2026", "Rollback" }, log);
+        Assert.Equal(new[] { "Begin", "LockTimeout=3s", "HandleCore@2026", "Rollback" }, log);
     }
 
     private static (IDispatcher Dispatcher, CallLog Log) Build()
