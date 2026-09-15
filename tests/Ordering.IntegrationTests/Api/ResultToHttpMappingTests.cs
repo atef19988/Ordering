@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Ordering.Api.Endpoints;
 using Ordering.Application.Abstractions;
+using Ordering.Domain.Common;
 
 namespace Ordering.IntegrationTests.Api;
 

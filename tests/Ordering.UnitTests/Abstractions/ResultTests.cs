@@ -1,4 +1,5 @@
 using Ordering.Application.Abstractions;
+using Ordering.Domain.Common;
 
 namespace Ordering.UnitTests.Abstractions;
 

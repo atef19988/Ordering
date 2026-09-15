@@ -1,7 +1,7 @@
 namespace Ordering.Application.Abstractions;
 
 /// <summary>
-/// The write-side transaction boundary. Implemented over EF Core in Infrastructure (Task 2).
+/// The write-side transaction boundary. Implemented over EF Core by <c>Infrastructure.Persistence.UnitOfWork</c>.
 /// </summary>
 public interface IUnitOfWork
 {

@@ -1,4 +1,5 @@
 using Dapper;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Ordering.Application.Abstractions;
@@ -13,6 +14,9 @@ public static class DependencyInjection
 
     /// <summary>Must differ per running instance; see README.</summary>
     public const string WorkerIdKey = "Snowflake:WorkerId";
+
+    /// <summary>When true the host migrates and seeds on startup (Development only by default).</summary>
+    public const string InitializeOnStartupKey = "Database:InitializeOnStartup";
 
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
@@ -29,7 +33,8 @@ public static class DependencyInjection
         // snake_case columns map onto PascalCase read-model properties.
         DefaultTypeMap.MatchNamesWithUnderscores = true;
 
-        // Task 2: OrderingDbContext (same connection string) + EF-backed IUnitOfWork.
+        services.AddDbContext<OrderingDbContext>(options => options.UseSqlServer(connectionString));
+        services.AddScoped<IUnitOfWork, UnitOfWork>();
 
         return services;
     }

@@ -1,6 +1,7 @@
 using FluentValidation;
 using Ordering.Application.Abstractions;
 using Ordering.Application.Abstractions.Messaging;
+using Ordering.Domain.Common;
 
 namespace Ordering.UnitTests.Abstractions;
 

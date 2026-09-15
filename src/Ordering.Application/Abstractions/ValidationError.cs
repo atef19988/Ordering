@@ -1,3 +1,5 @@
+using Ordering.Domain.Common;
+
 namespace Ordering.Application.Abstractions;
 
 /// <summary>

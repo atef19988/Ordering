@@ -74,7 +74,7 @@ from `dotnet run -- seed`:
 
 ## Definition of done
 
-- [ ] `dotnet ef migrations add Initial` applied to a real SQL Server, `dotnet ef database update` clean
-- [ ] Attempting `UPDATE products SET available_quantity = -1` is rejected by the check constraint
-- [ ] Unit tests: total calculation with 2dp rounding, quantity ≤ 0 rejected, cancel-from-cancelled rejected
-- [ ] Re-running seed twice leaves exactly two products
+- [x] `dotnet ef migrations add Initial` applied to a real SQL Server, `dotnet ef database update` clean
+- [x] Attempting `UPDATE products SET available_quantity = -1` is rejected by the check constraint
+- [x] Unit tests: total calculation with 2dp rounding, quantity ≤ 0 rejected, cancel-from-cancelled rejected
+- [x] Re-running seed twice leaves exactly two products

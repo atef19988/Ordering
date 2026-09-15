@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,10 +10,17 @@ namespace Ordering.IntegrationTests.Api;
 
 /// <summary>
 /// Proves the host composes: DI graph valid, middleware, JSON contract and Swagger wired. Needs no
-/// database. Task 8 replaces the raw factory with OrderingApiFactory + a Testcontainers SQL Server.
+/// database, so startup migration/seeding (on in Development) is switched off here.
+/// Task 8 replaces the raw factory with OrderingApiFactory + a Testcontainers SQL Server.
 /// </summary>
-public class ApiSmokeTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+public class ApiSmokeTests(ApiSmokeTests.HostWithoutDatabaseInitialization factory) : IClassFixture<ApiSmokeTests.HostWithoutDatabaseInitialization>
 {
+    public sealed class HostWithoutDatabaseInitialization : WebApplicationFactory<Program>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder) =>
+            builder.UseSetting(Ordering.Infrastructure.DependencyInjection.InitializeOnStartupKey, "false");
+    }
+
     [Fact]
     public async Task Swagger_document_is_served()
     {

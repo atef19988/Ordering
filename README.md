@@ -12,9 +12,12 @@ decisions; `docs/tasks/` is the build plan.
 
 ```bash
 docker compose up -d                  # SQL Server 2022 on localhost:1433; db-init creates the Ordering database
+dotnet tool restore                   # pins dotnet-ef 9.0.x (.config/dotnet-tools.json)
+dotnet ef database update -p src/Ordering.Infrastructure -s src/Ordering.Api   # apply migrations
+dotnet run --project src/Ordering.Api -- seed   # migrate + seed the two products, then exit
 dotnet build                          # net9.0, warnings as errors
-dotnet test                           # unit + integration tests (Task 1 needs no database)
-dotnet run --project src/Ordering.Api # https://localhost:5001 — /health, /swagger
+dotnet test                           # unit tests + integration tests on a Testcontainers SQL Server (needs Docker)
+dotnet run --project src/Ordering.Api # https://localhost:5001 — /health, /swagger; Development also migrates + seeds on startup
 ```
 
 The API connection string lives in `src/Ordering.Api/appsettings.json` and matches the compose
@@ -70,3 +73,48 @@ All three were owner instructions; every spec under `docs/` is written for this 
 - **Test placement.** Anything that needs the `Api` or `Infrastructure` assembly (Result→HTTP
   mapping, Snowflake generator, host smoke test) lives in `Ordering.IntegrationTests` even when
   it needs no database; `Ordering.UnitTests` references only `Domain` and `Application`.
+
+### Task 2 — domain and write model
+
+- **`Error` lives in `Ordering.Domain.Common`, not `Application.Abstractions`.** The Task 2 spec
+  puts `OrderErrors` (static `Error` factories) in Domain, and Domain may reference nothing, so the
+  `Error`/`ErrorType` types moved down one layer (`CLAUDE.md` already lists "domain errors" under
+  Domain). `Result`/`Result<T>` stay in `Application.Abstractions` and carry a `Domain.Error`.
+  Consumers only gained a `using Ordering.Domain.Common;`.
+- **Domain invariants throw; expected failures are `Result`s.** `Order.Create`/`OrderLine.Create`
+  reject bad input (`quantity <= 0`, blank or >64-char customer reference, no lines, a line of
+  another order, a product listed twice) with `ArgumentException`s, and `Order.Cancel` from a
+  non-`Confirmed` state throws `InvalidOperationException`. These are programming errors — the
+  request validator (Task 4) and the guarded `UPDATE ... WHERE status = 'Confirmed'` (Task 6) stop
+  callers from reaching them — whereas `OrderErrors.*` are the expected failures handlers return.
+- **Rounding.** `LineTotal = round(quantity × unitPrice, 2)` with `MidpointRounding.AwayFromZero`
+  (commercial rounding: 0.125 → 0.13) and `Total = Σ LineTotal`, so the stored `total` always
+  equals the sum of the stored `line_total`s. With catalogue prices at 2 dp the two readings of
+  "Σ(quantity × unitPrice) rounded to 2 dp" give the same number; the choice only matters for
+  synthetic 3-dp prices in unit tests.
+- **`row_version` is an EF shadow property.** The domain `Order` has no persistence field; the
+  concurrency token is configured in `OrderConfiguration` (`Property<byte[]>("RowVersion")
+  .IsRowVersion().IsRequired()`) and read via `context.Entry(order).Property("RowVersion")`.
+- **Extra index.** EF creates an index for every foreign key, so the migration also has
+  `ix_order_lines_product_code` (named to match the spec's `ix_` convention). It is harmless and
+  not part of any correctness argument.
+- **Explicit snake_case names.** Every table, column and constraint name is set in the
+  `IEntityTypeConfiguration`s rather than through a naming-convention package, so the migration
+  matches the DDL in the spec 1:1 and no extra dependency is needed.
+- **Seed and migrate on startup are one switch.** `Database:InitializeOnStartup` (true only in
+  `appsettings.Development.json`) makes the host run `DbInitializer.InitializeAsync` — migrate then
+  seed — before listening; `dotnet run -- seed` does the same and exits. Seeding is one guarded
+  `INSERT ... WHERE NOT EXISTS` per product, so it never resets stock of an existing product.
+  `WebApplicationFactory` hosts run as Development, so the DB-free `ApiSmokeTests` set the switch
+  to `false`; the Task 8 `OrderingApiFactory` can leave it on against its container.
+- **Real database in tests from now on.** `SqlServerFixture` (Testcontainers.MsSql,
+  `mcr.microsoft.com/mssql/server:2022-latest`, one container per collection, migrated once) backs
+  the schema, seed, EF-mapping and unit-of-work tests. `dotnet test` therefore needs Docker; the
+  compose database is not touched by tests. Task 8 adds `ResetAsync` and `OrderingApiFactory` on
+  top of this fixture.
+- **`dotnet-ef` is a local tool** (`.config/dotnet-tools.json`, 9.0.20 to match the runtime);
+  run `dotnet tool restore` once. `Microsoft.EntityFrameworkCore.Design` is referenced by the API
+  project with `PrivateAssets="all"` purely so `dotnet ef ... -s src/Ordering.Api` can build the
+  `DbContext` from the real DI graph.
+- **`Product` has no stock methods.** Deduct/restore are conditional `UPDATE`s in the database
+  (Tasks 4 and 6), never in-memory mutations, so the entity deliberately exposes none.

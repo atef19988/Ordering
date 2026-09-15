@@ -5,6 +5,7 @@ using Ordering.Api.Middleware;
 using Ordering.Api.Serialization;
 using Ordering.Application;
 using Ordering.Infrastructure;
+using Ordering.Infrastructure.Persistence;
 using Serilog;
 using Serilog.Core;
 
@@ -30,6 +31,13 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
+// `dotnet run -- seed`: migrate + seed, then exit without serving.
+if (args.Contains("seed", StringComparer.OrdinalIgnoreCase))
+{
+    await DbInitializer.InitializeAsync(app.Services, CancellationToken.None);
+    return;
+}
+
 app.UseSerilogRequestLogging();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseSwagger();
@@ -38,6 +46,11 @@ app.UseSwaggerUI();
 app.MapHealthChecks("/health");
 
 // Task 3: var api = app.MapGroup("/api"); api.MapProducts(); api.MapOrders();
+
+if (app.Configuration.GetValue<bool>(Ordering.Infrastructure.DependencyInjection.InitializeOnStartupKey))
+{
+    await DbInitializer.InitializeAsync(app.Services, app.Lifetime.ApplicationStopping);
+}
 
 app.Run();
 
