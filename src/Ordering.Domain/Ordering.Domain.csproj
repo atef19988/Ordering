@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Task 2: entities, value objects and domain errors land here. No package or project references, ever. -->
+
+</Project>
