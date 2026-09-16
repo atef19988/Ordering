@@ -17,7 +17,8 @@ namespace Ordering.Infrastructure.Notifications;
 /// the outbox row. Safe to run N times: every write is guarded by <c>status = 'Processing'</c>,
 /// and the attempt is counted in the same statement that checks the row is still live, so a
 /// duplicate delivery of a terminal row is acknowledged without a second send. Delivery itself
-/// runs with no database connection open.
+/// runs with no database connection open. The two <see cref="IFailurePoint"/> calls let a test
+/// kill the process at the only moments a redelivery is possible after a successful send.
 /// </summary>
 internal sealed partial class NotificationConsumer(
     INotificationQueue queue,
@@ -25,6 +26,7 @@ internal sealed partial class NotificationConsumer(
     IServiceScopeFactory scopeFactory,
     IClock clock,
     ConsumerOptions options,
+    IFailurePoint failurePoint,
     ILogger<NotificationConsumer> logger) : BackgroundService
 {
     /// <summary>Back-off between consume sessions when the broker is unreachable.</summary>
@@ -80,7 +82,13 @@ internal sealed partial class NotificationConsumer(
 
         if (result.Succeeded)
         {
+            // Dying here is the one duplicate the row cannot absorb: the broker redelivers, the
+            // row is still Processing, the attempt is counted and sent again. Only the delivery
+            // service, keyed on eventId, can tell the two apart (README, at-least-once).
+            await failurePoint.ReachedAsync(FailurePoints.NotificationDeliveredBeforeVerdict, cancellationToken);
             await store.MarkSentAsync(eventId, clock.UtcNow, cancellationToken);
+            // Dying here is harmless: the redelivery finds the row Sent and is acknowledged unsent.
+            await failurePoint.ReachedAsync(FailurePoints.NotificationSentBeforeAck, cancellationToken);
             // Task 13: publish a change hint for payload.OrderId here.
             return Acknowledgement.Ack;
         }

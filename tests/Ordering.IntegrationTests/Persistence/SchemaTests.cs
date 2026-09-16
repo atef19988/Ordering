@@ -1,18 +1,19 @@
+using Ordering.IntegrationTests.Backend;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ordering.IntegrationTests.Persistence;
 
-[Collection(SqlServerCollection.Name)]
-public class SchemaTests(SqlServerFixture fixture)
+[Collection(BackendCollection.Name)]
+public class SchemaTests(BackendFixture backend)
 {
     private const int CheckConstraintViolation = 547;
 
     [Fact]
     public async Task Initial_migration_is_applied_and_nothing_is_pending()
     {
-        await using var context = fixture.CreateContext();
+        await using var context = backend.Sql.CreateContext();
 
         var applied = await context.Database.GetAppliedMigrationsAsync();
         var pending = await context.Database.GetPendingMigrationsAsync();
@@ -24,7 +25,7 @@ public class SchemaTests(SqlServerFixture fixture)
     [Fact]
     public async Task Stock_cannot_go_negative_even_with_a_direct_update()
     {
-        await using var connection = await fixture.OpenConnectionAsync();
+        await using var connection = await backend.Sql.OpenConnectionAsync();
         const string code = "SCHEMA-NEG";
         await connection.ExecuteAsync("INSERT INTO products (code, name, price, available_quantity) VALUES (@code, 'probe', 1.00, 1)", new { code });
 
@@ -46,7 +47,7 @@ public class SchemaTests(SqlServerFixture fixture)
     [Fact]
     public async Task Order_line_quantity_must_be_positive_in_the_database()
     {
-        await using var connection = await fixture.OpenConnectionAsync();
+        await using var connection = await backend.Sql.OpenConnectionAsync();
         const string code = "SCHEMA-QTY";
         await connection.ExecuteAsync("INSERT INTO products (code, name, price, available_quantity) VALUES (@code, 'probe', 1.00, 1)", new { code });
         await connection.ExecuteAsync(
@@ -70,7 +71,7 @@ public class SchemaTests(SqlServerFixture fixture)
     [Fact]
     public async Task Money_columns_are_decimal_18_2()
     {
-        await using var connection = await fixture.OpenConnectionAsync();
+        await using var connection = await backend.Sql.OpenConnectionAsync();
 
         var columns = (await connection.QueryAsync<(string Table, string Column, string Type, byte Precision, byte Scale)>(
             """

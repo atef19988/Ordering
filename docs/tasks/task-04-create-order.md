@@ -88,9 +88,9 @@ In EF: `.HasIndex(...).IsUnique().HasFilter("[type] = 'order.created'")`.
 
 ## Definition of done
 
-- [ ] Integration test: 1 unit in stock, two concurrent different orders → one 201, one 409, stock = 0
-- [ ] Integration test: forced exception before commit → no order, no stock change, no outbox row
-- [ ] Integration test: 409 response leaves stock untouched (not partially deducted on multi-line)
+- [x] Integration test: 1 unit in stock, two concurrent different orders → one 201, one 409, stock = 0
+- [x] Integration test: forced exception before commit → no order, no stock change, no outbox row
+- [x] Integration test: 409 response leaves stock untouched (not partially deducted on multi-line)
 - [x] Total is computed server-side even if the client sends a price field (it is ignored)
 
 > Test code was deferred by owner instruction ("skip write test code"). The behaviours were

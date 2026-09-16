@@ -1,17 +1,18 @@
+using Ordering.IntegrationTests.Backend;
 using Dapper;
 using Ordering.Infrastructure.Persistence;
 
 namespace Ordering.IntegrationTests.Persistence;
 
-[Collection(SqlServerCollection.Name)]
-public class DbInitializerTests(SqlServerFixture fixture)
+[Collection(BackendCollection.Name)]
+public class DbInitializerTests(BackendFixture backend)
 {
     [Fact]
     public async Task Seeding_twice_leaves_exactly_the_two_products()
     {
-        await fixture.ResetAsync();
-        await using var connection = await fixture.OpenConnectionAsync();
-        await using var context = fixture.CreateContext();
+        await backend.Sql.ResetAsync();
+        await using var connection = await backend.Sql.OpenConnectionAsync();
+        await using var context = backend.Sql.CreateContext();
 
         await DbInitializer.SeedAsync(context, CancellationToken.None);
         await DbInitializer.SeedAsync(context, CancellationToken.None);
@@ -27,9 +28,9 @@ public class DbInitializerTests(SqlServerFixture fixture)
     [Fact]
     public async Task Reseeding_does_not_reset_stock_of_existing_products()
     {
-        await fixture.ResetAsync();
-        await using var connection = await fixture.OpenConnectionAsync();
-        await using var context = fixture.CreateContext();
+        await backend.Sql.ResetAsync();
+        await using var connection = await backend.Sql.OpenConnectionAsync();
+        await using var context = backend.Sql.CreateContext();
         await connection.ExecuteAsync("UPDATE products SET available_quantity = 3 WHERE code = 'SKU-001'");
 
         await DbInitializer.SeedAsync(context, CancellationToken.None);

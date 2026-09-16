@@ -193,7 +193,10 @@ written → broker redelivers → counted and delivered again. Consumer died bet
 publish and the ACK → original redelivered → one extra attempt, still bounded. Published but the
 verdict never came → reaper re-publishes → duplicate, absorbed by the `Processing` guard if the
 verdict did arrive meanwhile. The consumer must treat the event id as a dedupe key. This is
-documented, not hidden.
+documented, not hidden — and tested: `NotificationDeliveryTests` kills a real host at
+`notification.sent.before-ack` (the redelivery is acknowledged unsent, one send) and at
+`notification.delivered.before-verdict` (the redelivery is sent again with the same event id,
+`attempt_count = 2`), through `IFailurePoint`, the only test seam in production code.
 
 ## 7. Notification status in the order API
 

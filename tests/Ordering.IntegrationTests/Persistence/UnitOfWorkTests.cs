@@ -1,16 +1,17 @@
+using Ordering.IntegrationTests.Backend;
 using Dapper;
 using Ordering.Domain.Products;
 using Ordering.Infrastructure.Persistence;
 
 namespace Ordering.IntegrationTests.Persistence;
 
-[Collection(SqlServerCollection.Name)]
-public class UnitOfWorkTests(SqlServerFixture fixture)
+[Collection(BackendCollection.Name)]
+public class UnitOfWorkTests(BackendFixture backend)
 {
     [Fact]
     public async Task Rollback_discards_changes_saved_inside_the_transaction()
     {
-        await using var context = fixture.CreateContext();
+        await using var context = backend.Sql.CreateContext();
         var unitOfWork = new UnitOfWork(context);
 
         await unitOfWork.BeginTransactionAsync(CancellationToken.None);
@@ -24,7 +25,7 @@ public class UnitOfWorkTests(SqlServerFixture fixture)
     [Fact]
     public async Task Commit_makes_changes_visible()
     {
-        await using var context = fixture.CreateContext();
+        await using var context = backend.Sql.CreateContext();
         var unitOfWork = new UnitOfWork(context);
 
         try
@@ -38,7 +39,7 @@ public class UnitOfWorkTests(SqlServerFixture fixture)
         }
         finally
         {
-            await using var connection = await fixture.OpenConnectionAsync();
+            await using var connection = await backend.Sql.OpenConnectionAsync();
             await connection.ExecuteAsync("DELETE FROM products WHERE code = 'UOW-COMMIT'");
         }
     }
@@ -46,7 +47,7 @@ public class UnitOfWorkTests(SqlServerFixture fixture)
     [Fact]
     public async Task Commit_and_rollback_without_a_transaction_are_no_ops()
     {
-        await using var context = fixture.CreateContext();
+        await using var context = backend.Sql.CreateContext();
         var unitOfWork = new UnitOfWork(context);
 
         await unitOfWork.CommitAsync(CancellationToken.None);
@@ -55,7 +56,7 @@ public class UnitOfWorkTests(SqlServerFixture fixture)
 
     private async Task<int> CountAsync(string code)
     {
-        await using var connection = await fixture.OpenConnectionAsync();
+        await using var connection = await backend.Sql.OpenConnectionAsync();
         return await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM products WHERE code = @code", new { code });
     }
 }

@@ -7,10 +7,11 @@ using Testcontainers.MsSql;
 namespace Ordering.IntegrationTests.Persistence;
 
 /// <summary>
-/// One SQL Server 2022 container per test collection, migrated once. Tests share the database and
-/// must leave it as they found it.
+/// One SQL Server 2022 container per test collection, migrated once, owned by
+/// <c>BackendFixture</c>. Tests share the database and either leave it as they found it or start
+/// from <see cref="ResetAsync"/>. The query helpers below are how a test reads an invariant
+/// straight from the database with Dapper, never through the API it is testing.
 /// </summary>
-// Task 8: purge every RabbitMQ queue in ResetAsync and pair this with RabbitMqFixture in one "Backend" collection.
 public sealed class SqlServerFixture : IAsyncLifetime
 {
     private readonly MsSqlContainer _container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
@@ -36,17 +37,14 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// </summary>
     public async Task ResetAsync()
     {
-        await using (var connection = await OpenConnectionAsync())
-        {
-            await connection.ExecuteAsync(
-                """
-                DELETE FROM order_lines;
-                DELETE FROM idempotency_keys;
-                DELETE FROM outbox_messages;
-                DELETE FROM orders;
-                DELETE FROM products;
-                """);
-        }
+        await ExecuteAsync(
+            """
+            DELETE FROM order_lines;
+            DELETE FROM idempotency_keys;
+            DELETE FROM outbox_messages;
+            DELETE FROM orders;
+            DELETE FROM products;
+            """);
 
         await using var context = CreateContext();
         await DbInitializer.SeedAsync(context, CancellationToken.None);
@@ -61,10 +59,64 @@ public sealed class SqlServerFixture : IAsyncLifetime
         await connection.OpenAsync();
         return connection;
     }
+
+    public async Task<T> ScalarAsync<T>(string sql, object? parameters = null)
+    {
+        await using var connection = await OpenConnectionAsync();
+        return await connection.ExecuteScalarAsync<T>(sql, parameters)
+            ?? throw new InvalidOperationException($"Scalar query returned no value: {sql}");
+    }
+
+    public async Task<int> ExecuteAsync(string sql, object? parameters = null)
+    {
+        await using var connection = await OpenConnectionAsync();
+        return await connection.ExecuteAsync(sql, parameters);
+    }
+
+    public Task<int> CountAsync(string sql, object? parameters = null) => ScalarAsync<int>(sql, parameters);
+
+    public Task<int> StockAsync(string code) =>
+        ScalarAsync<int>("SELECT available_quantity FROM products WHERE code = @code", new { code });
+
+    /// <summary>A product of the test's own, so tests that do not reset the database cannot see each other.</summary>
+    public async Task<string> AddProductAsync(string prefix, int stock, decimal price = 12.50m)
+    {
+        var code = $"{prefix}-{Guid.NewGuid():N}"[..20];
+        await ExecuteAsync(
+            "INSERT INTO products (code, name, price, available_quantity) VALUES (@code, 'test product', @price, @stock)",
+            new { code, price, stock });
+        return code;
+    }
+
+    /// <summary>Row counts of every table the create path writes, plus one product's stock: what must not move when a request is refused.</summary>
+    public async Task<WriteSnapshot> SnapshotAsync(string code)
+    {
+        await using var connection = await OpenConnectionAsync();
+        return await connection.QuerySingleAsync<WriteSnapshot>(
+            """
+            SELECT (SELECT COUNT(*) FROM orders)                                AS Orders,
+                   (SELECT COUNT(*) FROM order_lines)                           AS Lines,
+                   (SELECT COUNT(*) FROM outbox_messages)                       AS Outbox,
+                   (SELECT COUNT(*) FROM idempotency_keys)                      AS Keys,
+                   (SELECT available_quantity FROM products WHERE code = @code) AS Stock;
+            """,
+            new { code });
+    }
+
+    /// <summary>The <c>order.created</c> outbox row of an order, as the relay and consumer leave it.</summary>
+    public async Task<OutboxRow> OutboxRowAsync(long orderId)
+    {
+        await using var connection = await OpenConnectionAsync();
+        return await connection.QuerySingleAsync<OutboxRow>(
+            """
+            SELECT id AS Id, status AS Status, attempt_count AS AttemptCount, last_error AS LastError
+              FROM outbox_messages
+             WHERE type = 'order.created' AND aggregate_id = @orderId;
+            """,
+            new { orderId });
+    }
 }
 
-[CollectionDefinition(Name)]
-public sealed class SqlServerCollection : ICollectionFixture<SqlServerFixture>
-{
-    public const string Name = "SqlServer";
-}
+public sealed record WriteSnapshot(int Orders, int Lines, int Outbox, int Keys, int Stock);
+
+public sealed record OutboxRow(long Id, string Status, int AttemptCount, string? LastError);

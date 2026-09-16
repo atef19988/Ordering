@@ -13,8 +13,8 @@ namespace Ordering.IntegrationTests.Api;
 /// <summary>
 /// Proves the host composes: DI graph valid, middleware, JSON contract and Swagger wired. Needs no
 /// database and no broker, so startup migration/seeding (on in Development), the outbox relay and
-/// the notification consumer are switched off here.
-/// Task 8 replaces the raw factory with OrderingApiFactory + a Testcontainers SQL Server.
+/// the notification consumer are switched off here. Kept off the containers on purpose: these
+/// run in milliseconds; everything that touches the backend lives in the Backend collection.
 /// </summary>
 public class ApiSmokeTests(ApiSmokeTests.HostWithoutDatabaseInitialization factory) : IClassFixture<ApiSmokeTests.HostWithoutDatabaseInitialization>
 {

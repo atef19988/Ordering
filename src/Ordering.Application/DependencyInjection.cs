@@ -1,6 +1,8 @@
 using System.Reflection;
 using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Ordering.Application.Abstractions;
 using Ordering.Application.Abstractions.Behaviors;
 using Ordering.Application.Abstractions.Messaging;
 
@@ -13,6 +15,9 @@ public static class DependencyInjection
         var assembly = typeof(DependencyInjection).Assembly;
 
         services.AddScoped<IDispatcher, Dispatcher>();
+
+        // Test seam; the integration-test host replaces it. TryAdd so a host registered first wins.
+        services.TryAddSingleton<IFailurePoint, NoFailurePoint>();
 
         // Registration order is pipeline order: outermost first.
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));

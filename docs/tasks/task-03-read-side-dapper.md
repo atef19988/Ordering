@@ -64,8 +64,8 @@ and return `result.ToHttpResult()`. Nothing else.
 
 ## Definition of done
 
-- [ ] Integration test: seeded products come back with exact decimal prices (12.50, not 12.5000001)
-- [ ] Integration test: unknown order id → 404 ProblemDetails
+- [x] Integration test: seeded products come back with exact decimal prices (12.50, not 12.5000001)
+- [x] Integration test: unknown order id → 404 ProblemDetails
 - [x] Order detail returns lines ordered by product code and a `notificationStatus`
 - [x] No EF `DbContext` reference anywhere in `Infrastructure/Read`
 

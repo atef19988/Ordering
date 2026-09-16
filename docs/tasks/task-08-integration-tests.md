@@ -79,10 +79,18 @@ Tick those boxes in the Task 3 and Task 4 files when they pass.
 
 ## Definition of done
 
-- [ ] All six tests exist, are green, and fail if their safeguard is removed
+- [x] All six tests exist, are green, and fail if their safeguard is removed
       (temporarily delete the `AND available_quantity >= @qty` guard and confirm test 1 goes red;
       temporarily drop the `AND status = 'Processing'` guard in the consumer and confirm 6a goes
       red — then restore both and note it in the README)
-- [ ] The four deferred Task 3/4 tests are green and their boxes are ticked
-- [ ] `dotnet test` green from a clean clone with only Docker running; total wall time recorded in the README
-- [ ] No test uses `UseInMemoryDatabase`
+- [x] The four deferred Task 3/4 tests are green and their boxes are ticked
+- [x] `dotnet test` green from a clean clone with only Docker running; total wall time recorded in the README
+- [x] No test uses `UseInMemoryDatabase`
+
+> Mutation check (README, Task 8): without the stock guard, test 1, the 50-way race and the
+> multi-line test go red. Without the consumer's `status = 'Processing'` guard, **6a stays
+> green** — a clean `FailFirstN` run never produces a duplicate delivery, so 6a cannot observe
+> that guard; the test that goes red is
+> `Notification_WhenTheProcessDiesAfterTheVerdictBeforeTheAck_IsNotSentAgainOnRedelivery_ThroughBroker`
+> (a second successful send, `Attempt = 2`). Both guards restored. `dotnet test`: 56 s from a
+> rebuild with the images pulled; three consecutive green runs.

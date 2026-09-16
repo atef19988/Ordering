@@ -1,3 +1,4 @@
+using Ordering.IntegrationTests.Backend;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
 using Ordering.Domain.Orders;
@@ -10,8 +11,8 @@ namespace Ordering.IntegrationTests.Persistence;
 /// Proves the EF mapping of the domain types: private constructors, the <c>_lines</c> backing field,
 /// enum-as-text status, exact decimals, <c>datetimeoffset</c> and the <c>rowversion</c> token.
 /// </summary>
-[Collection(SqlServerCollection.Name)]
-public class OrderPersistenceTests(SqlServerFixture fixture)
+[Collection(BackendCollection.Name)]
+public class OrderPersistenceTests(BackendFixture backend)
 {
     private static readonly SnowflakeIdGenerator Ids = new(new SystemClock(), workerId: 3);
     private static readonly DateTimeOffset CreatedAt = new(2026, 9, 16, 12, 0, 0, TimeSpan.FromHours(2));
@@ -23,7 +24,7 @@ public class OrderPersistenceTests(SqlServerFixture fixture)
 
         try
         {
-            await using var context = fixture.CreateContext();
+            await using var context = backend.Sql.CreateContext();
             var loaded = await context.Orders.Include(o => o.Lines).SingleAsync(o => o.Id == order.Id);
 
             Assert.Equal("CUST-42", loaded.CustomerReference);
@@ -37,7 +38,7 @@ public class OrderPersistenceTests(SqlServerFixture fixture)
                 loaded.Lines.Select(Shape).OrderBy(l => l.Id));
             Assert.NotNull(context.Entry(loaded).Property<byte[]>("RowVersion").CurrentValue);
 
-            await using var connection = await fixture.OpenConnectionAsync();
+            await using var connection = await backend.Sql.OpenConnectionAsync();
             Assert.Equal("Confirmed", await connection.ExecuteScalarAsync<string>("SELECT status FROM orders WHERE id = @id", new { id = order.Id }));
         }
         finally
@@ -54,14 +55,14 @@ public class OrderPersistenceTests(SqlServerFixture fixture)
 
         try
         {
-            await using (var context = fixture.CreateContext())
+            await using (var context = backend.Sql.CreateContext())
             {
                 var loaded = await context.Orders.SingleAsync(o => o.Id == order.Id);
                 loaded.Cancel(cancelledAt);
                 await context.SaveChangesAsync();
             }
 
-            await using var connection = await fixture.OpenConnectionAsync();
+            await using var connection = await backend.Sql.OpenConnectionAsync();
             var row = await connection.QuerySingleAsync<(string Status, DateTimeOffset? CancelledAt)>(
                 "SELECT status, cancelled_at FROM orders WHERE id = @id", new { id = order.Id });
             Assert.Equal(("Cancelled", cancelledAt), row);
@@ -79,8 +80,8 @@ public class OrderPersistenceTests(SqlServerFixture fixture)
 
         try
         {
-            await using var first = fixture.CreateContext();
-            await using var second = fixture.CreateContext();
+            await using var first = backend.Sql.CreateContext();
+            await using var second = backend.Sql.CreateContext();
             var firstCopy = await first.Orders.SingleAsync(o => o.Id == order.Id);
             var secondCopy = await second.Orders.SingleAsync(o => o.Id == order.Id);
 
@@ -98,7 +99,7 @@ public class OrderPersistenceTests(SqlServerFixture fixture)
 
     private async Task<Order> InsertOrderAsync()
     {
-        await using var context = fixture.CreateContext();
+        await using var context = backend.Sql.CreateContext();
         await DbInitializer.SeedAsync(context, CancellationToken.None);
 
         var orderId = Ids.NewId();
@@ -118,7 +119,7 @@ public class OrderPersistenceTests(SqlServerFixture fixture)
 
     private async Task DeleteOrderAsync(long id)
     {
-        await using var connection = await fixture.OpenConnectionAsync();
+        await using var connection = await backend.Sql.OpenConnectionAsync();
         await connection.ExecuteAsync("DELETE FROM orders WHERE id = @id", new { id }); // lines cascade
     }
 

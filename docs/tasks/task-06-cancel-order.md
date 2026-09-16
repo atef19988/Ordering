@@ -74,12 +74,12 @@ document that in the README as a known, accepted behaviour (the created event re
 
 ## Definition of done
 
-- [ ] Integration test: two concurrent cancels of the same order → both return 200, status
+- [x] Integration test: two concurrent cancels of the same order → both return 200, status
       `Cancelled`, stock restored exactly once (quantity back to its pre-order value, not double)
 - [x] Cancel unknown id → 404
 - [x] Cancel, then replay the original submission with its idempotency key → 200 `Cancelled`,
       no new order, no second deduction
-- [ ] Cancel is covered by a test that asserts the `UPDATE ... WHERE status='Confirmed'` guard
+- [x] Cancel is covered by a test that asserts the `UPDATE ... WHERE status='Confirmed'` guard
       actually runs (e.g. rows-affected assertion or SQL log)
 - [x] Create and cancel racing on two overlapping products (A+B vs B+A) 50 times → no deadlock
       victim (error 1205) in the logs, stock adds up at the end
