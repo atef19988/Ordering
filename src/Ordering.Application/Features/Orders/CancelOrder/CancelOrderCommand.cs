@@ -1,4 +1,5 @@
 using Ordering.Application.Abstractions;
+using Ordering.Application.Abstractions.Caching;
 using Ordering.Application.Abstractions.Messaging;
 using Ordering.Application.Abstractions.Persistence;
 using Ordering.Application.Features.Orders.GetOrderById;
@@ -20,14 +21,18 @@ public sealed record CancelOrderCommand(long OrderId) : ICommand<OrderDetailDto>
 /// affected. Only that one restores stock — in product-code order, the lock order create deducts
 /// in, so a cancel racing a create on overlapping products cannot deadlock — as the last
 /// statements before commit. Everyone else touches nothing and answers from a committed read.
-/// Nothing is decided in C# before the update, and nothing runs after the commit yet.
+/// Nothing is decided in C# before the update; after the commit — and only for the one cancel
+/// that committed — the catalogue cache is evicted and a change hint is published, both
+/// best-effort through <see cref="IUnitOfWork.OnCommitted"/>.
 /// </summary>
 internal sealed class CancelOrderCommandHandler(
     IUnitOfWork unitOfWork,
     IClock clock,
     IOrderRepository orders,
     IStockRepository stock,
-    IOrderQueryRepository orderQuery)
+    IOrderQueryRepository orderQuery,
+    ICatalogueCache catalogue,
+    IChangeHintPublisher changeHints)
     : BaseCommandHandler<CancelOrderCommand, OrderDetailDto>(unitOfWork, clock)
 {
     protected override async Task<Result<OrderDetailDto>> HandleCore(CancelOrderCommand command, CancellationToken cancellationToken)
@@ -81,8 +86,11 @@ internal sealed class CancelOrderCommandHandler(
             }
         }
 
-        // Task 13: UnitOfWork.OnCommitted(ct => changeHints.OrderChangedAsync(order.Id, ct)) — publish a change hint for this order.
-        // Task 14: UnitOfWork.OnCommitted(...) — release the restored quantities in the Redis stock gate and evict the `catalogue` cache tag.
+        // After the commit, never inside it: stock changed, so every cached catalogue page is
+        // stale; the order changed, so every open event stream for it should re-read.
+        UnitOfWork.OnCommitted(catalogue.InvalidateAsync);
+        UnitOfWork.OnCommitted(ct => changeHints.OrderChangedAsync(order.Id, ct));
+        // Task 14: UnitOfWork.OnCommitted(...) — release the restored quantities in the Redis stock gate.
 
         // Success: TransactionBehavior commits. Nothing is tracked, so the base class's final save flushes nothing.
         return order;

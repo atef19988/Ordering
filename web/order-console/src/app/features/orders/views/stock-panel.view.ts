@@ -16,7 +16,6 @@ import { UiAlertComponent } from '../../../lib/ui/ui-alert.component';
 import { UiBadgeComponent } from '../../../lib/ui/ui-badge.component';
 import { UiButtonComponent } from '../../../lib/ui/ui-button.component';
 import { UiDataColumn, UiDataTableComponent } from '../../../lib/ui/ui-data-table.component';
-import { UiFieldComponent } from '../../../lib/ui/ui-field.component';
 import { UiPaginatorComponent } from '../../../lib/ui/ui-paginator.component';
 import { CatalogueQuery, CatalogueSortField, Product } from '../models/order.models';
 import { CatalogueApi } from '../services/catalogue.api';
@@ -72,26 +71,24 @@ function sameQuery(a: CatalogueQuery, b: CatalogueQuery): boolean {
   imports: [
     UiDataTableComponent,
     UiPaginatorComponent,
-    UiFieldComponent,
     UiButtonComponent,
     UiAlertComponent,
     UiBadgeComponent,
   ],
   template: `
     <div class="toolbar">
-      <ui-field class="search" label="Search" for="stock-search">
-        <input
-          id="stock-search"
-          class="control control--data"
-          type="search"
-          autocomplete="off"
-          spellcheck="false"
-          maxlength="64"
-          placeholder="Code or name starts with…"
-          [value]="catalogue.query().search"
-          (input)="onSearch($event)"
-        />
-      </ui-field>
+      <label class="visually-hidden" for="stock-search">Search</label>
+      <input
+        id="stock-search"
+        class="control control--data search"
+        type="search"
+        autocomplete="off"
+        spellcheck="false"
+        maxlength="64"
+        placeholder="Code or name starts with…"
+        [value]="catalogue.query().search"
+        (input)="onSearch($event)"
+      />
       <label class="check">
         <input type="checkbox" [checked]="catalogue.query().inStock" (change)="onInStock($event)" />
         In stock only
@@ -159,8 +156,9 @@ function sameQuery(a: CatalogueQuery, b: CatalogueQuery): boolean {
     .toolbar {
       display: flex;
       flex-wrap: wrap;
-      align-items: flex-end;
-      gap: var(--s-2) var(--s-4);
+      align-items: center;
+      gap: var(--s-3) var(--s-4);
+      margin-bottom: var(--s-3);
     }
 
     .search {
@@ -172,17 +170,12 @@ function sameQuery(a: CatalogueQuery, b: CatalogueQuery): boolean {
       display: flex;
       align-items: center;
       gap: var(--s-2);
-      margin-bottom: var(--s-4);
-      padding-bottom: 1.25em;
       font-size: var(--t-sm);
     }
 
     .as-of {
       margin-left: auto;
-      margin-bottom: var(--s-4);
-      padding-bottom: 1.25em;
       font-size: var(--t-sm);
-      min-height: 1.25em;
     }
 
     .alert {
@@ -207,6 +200,7 @@ function sameQuery(a: CatalogueQuery, b: CatalogueQuery): boolean {
 
     @media (max-width: 599px) {
       .as-of {
+        flex-basis: 100%;
         margin-left: 0;
       }
     }

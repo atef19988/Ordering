@@ -45,6 +45,66 @@ services:
       retries: 12
       start_period: 20s
 
+  # Hot state only (output cache, stock gate, idempotency fast path). SQL Server stays the truth,
+  # so no persistence: a restart means an empty cache and an open gate, which the API tolerates.
+  redis:
+    image: redis:7-alpine
+    container_name: ordering-redis
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  # ---- Application images (opt-in) -------------------------------------------------------------
+  # `docker compose up -d` starts infrastructure only, so `dotnet run` / `ng serve` keep working on
+  # their usual ports. `docker compose --profile app up -d --build` also builds and runs the API and
+  # the console: http://localhost:8080 (console, proxies /api to the API) and http://localhost:5000.
+  api:
+    build:
+      context: .
+      dockerfile: src/Ordering.Api/Dockerfile
+    image: ordering-api
+    container_name: ordering-api
+    profiles: ["app"]
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Ordering: "Server=db,1433;Database=Ordering;User Id=sa;Password=Ordering!Passw0rd;TrustServerCertificate=True;Encrypt=False"
+      RabbitMq__Host: rabbitmq
+      Redis__Configuration: "redis:6379"
+      Database__InitializeOnStartup: "true"   # migrate + seed the two products on first start
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  web:
+    build:
+      context: web/order-console
+    image: ordering-web
+    container_name: ordering-web
+    profiles: ["app"]
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
 volumes:
   ordering-mssql:
   ordering-rabbitmq:

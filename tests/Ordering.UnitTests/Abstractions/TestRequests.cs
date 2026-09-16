@@ -24,6 +24,10 @@ internal sealed class FakeUnitOfWork(CallLog log) : IUnitOfWork
         return Task.FromResult(1);
     }
 
+    public void OnCommitted(Func<CancellationToken, Task> action) => log.Add("OnCommitted");
+
+    public IReadOnlyList<Func<CancellationToken, Task>> TakeCommittedActions() => [];
+
     private Task Record(string call)
     {
         log.Add(call);

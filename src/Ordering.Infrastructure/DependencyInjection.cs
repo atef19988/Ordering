@@ -17,6 +17,7 @@ using Ordering.Infrastructure.Notifications;
 using Ordering.Infrastructure.Outbox;
 using Ordering.Infrastructure.Persistence;
 using Ordering.Infrastructure.Read;
+using Ordering.Infrastructure.Redis;
 
 namespace Ordering.Infrastructure;
 
@@ -61,7 +62,9 @@ public static class DependencyInjection
         services.AddScoped<IProductQueryRepository, ProductQueryRepository>();
         services.AddScoped<IOrderQueryRepository, OrderQueryRepository>();
 
-        return services.AddMessaging(configuration, workerId);
+        return services
+            .AddRedis(configuration)
+            .AddMessaging(configuration, workerId);
     }
 
     /// <summary>
@@ -85,6 +88,12 @@ public static class DependencyInjection
         services.AddSingleton(sp => new RabbitMqConnection(rabbitMq, $"ordering-api/{workerId}", sp.GetRequiredService<ILogger<RabbitMqConnection>>()));
         services.AddSingleton<IEventPublisher, RabbitMqEventPublisher>();
         services.AddSingleton<INotificationQueue, RabbitMqNotificationQueue>();
+
+        // Change hints (Task 13): one fire-and-forget publisher per process, and the subscription
+        // the API's listener consumes. Same object, two seams.
+        services.AddSingleton<RabbitMqChangeHints>();
+        services.AddSingleton<IChangeHintPublisher>(sp => sp.GetRequiredService<RabbitMqChangeHints>());
+        services.AddSingleton<IChangeHintSubscription>(sp => sp.GetRequiredService<RabbitMqChangeHints>());
 
         // Outbox bookkeeping: single statements on their own connections, outside the CQRS pipeline.
         services.AddSingleton<OutboxStore>();

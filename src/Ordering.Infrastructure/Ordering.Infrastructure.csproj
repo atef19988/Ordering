@@ -5,6 +5,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Task 13: IOutputCacheStore (the Redis-backed catalogue cache wrapper) is a shared-framework type. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- The integration tests purge the queues RabbitMqTopology names and read InboundMessage shapes. -->
     <InternalsVisibleTo Include="Ordering.IntegrationTests" />
   </ItemGroup>
@@ -17,6 +22,8 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="RabbitMQ.Client" />
+    <PackageReference Include="StackExchange.Redis" />
+    <PackageReference Include="Microsoft.AspNetCore.OutputCaching.StackExchangeRedis" />
   </ItemGroup>
 
 </Project>

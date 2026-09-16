@@ -33,8 +33,8 @@ import { CatalogueApi } from '../services/catalogue.api';
     <ui-combobox
       [inputId]="id()"
       [options]="options()"
-      [optionLabel]="label"
-      [optionKey]="key"
+      [optionLabel]="code"
+      [optionTemplate]="optionRow"
       [loading]="searching()"
       [disabled]="disabled()"
       [data]="true"
@@ -44,6 +44,34 @@ import { CatalogueApi } from '../services/catalogue.api';
       (selectedChange)="onSelected($event)"
       (search)="lookups.next($event)"
     />
+    <!-- The input holds the code alone (it is what the order sends); the rest of the row lives here. -->
+    <ng-template #optionRow let-product>
+      <span class="data">{{ product.code }}</span> — {{ product.name }}
+      <span class="muted">· {{ product.availableQuantity }} left</span>
+    </ng-template>
+    @if (selected(); as product) {
+      @if (product.name) {
+        <p class="picked muted">{{ product.name }} · {{ product.availableQuantity }} left</p>
+      }
+    }
+  `,
+  styles: `
+    :host {
+      display: block;
+    }
+
+    .picked {
+      margin-top: var(--s-1);
+      font-size: var(--t-sm);
+    }
+
+    .data {
+      font-family: var(--f-data);
+    }
+
+    .muted {
+      color: var(--c-ink-muted);
+    }
   `,
 })
 export class ProductPickerComponent implements ControlValueAccessor {
@@ -56,11 +84,7 @@ export class ProductPickerComponent implements ControlValueAccessor {
   protected readonly selected = signal<Product | null>(null);
   protected readonly lookups = new Subject<string>();
 
-  protected readonly label = (product: Product): string =>
-    product.name === ''
-      ? product.code
-      : `${product.code} — ${product.name} · ${product.availableQuantity} left`;
-  protected readonly key = (product: Product): string => product.code;
+  protected readonly code = (product: Product): string => product.code;
 
   protected onChange: (code: string | null) => void = () => undefined;
   protected onTouched: () => void = () => undefined;

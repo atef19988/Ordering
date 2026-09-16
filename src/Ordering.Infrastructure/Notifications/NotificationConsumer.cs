@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Ordering.Application.Abstractions;
+using Ordering.Application.Abstractions.Messaging;
 using Ordering.Application.Abstractions.Outbox;
 using Ordering.Application.Features.Orders;
 using Ordering.Application.Notifications;
@@ -18,7 +19,9 @@ namespace Ordering.Infrastructure.Notifications;
 /// and the attempt is counted in the same statement that checks the row is still live, so a
 /// duplicate delivery of a terminal row is acknowledged without a second send. Delivery itself
 /// runs with no database connection open. The two <see cref="IFailurePoint"/> calls let a test
-/// kill the process at the only moments a redelivery is possible after a successful send.
+/// kill the process at the only moments a redelivery is possible after a successful send. A
+/// verdict (<c>Sent</c> or <c>Failed</c>) is followed by a best-effort change hint so open
+/// event streams for the order push the new notification status.
 /// </summary>
 internal sealed partial class NotificationConsumer(
     INotificationQueue queue,
@@ -27,6 +30,7 @@ internal sealed partial class NotificationConsumer(
     IClock clock,
     ConsumerOptions options,
     IFailurePoint failurePoint,
+    IChangeHintPublisher changeHints,
     ILogger<NotificationConsumer> logger) : BackgroundService
 {
     /// <summary>Back-off between consume sessions when the broker is unreachable.</summary>
@@ -89,7 +93,7 @@ internal sealed partial class NotificationConsumer(
             await store.MarkSentAsync(eventId, clock.UtcNow, cancellationToken);
             // Dying here is harmless: the redelivery finds the row Sent and is acknowledged unsent.
             await failurePoint.ReachedAsync(FailurePoints.NotificationSentBeforeAck, cancellationToken);
-            // Task 13: publish a change hint for payload.OrderId here.
+            await changeHints.OrderChangedAsync(payload.OrderId, cancellationToken);
             return Acknowledgement.Ack;
         }
 
@@ -99,7 +103,7 @@ internal sealed partial class NotificationConsumer(
         {
             await store.MarkFailedAsync(eventId, clock.UtcNow, error, cancellationToken);
             LogExhausted(logger, eventId, attempt.Value);
-            // Task 13: publish a change hint for payload.OrderId here.
+            await changeHints.OrderChangedAsync(payload.OrderId, cancellationToken);
             return Acknowledgement.Ack;
         }
 

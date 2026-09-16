@@ -3,10 +3,10 @@ using Ordering.IntegrationTests.Persistence;
 namespace Ordering.IntegrationTests.Backend;
 
 /// <summary>
-/// The real backend, once per collection: SQL Server and RabbitMQ side by side, started
+/// The real backend, once per collection: SQL Server, RabbitMQ and Redis side by side, started
 /// together. Every integration test class joins <see cref="BackendCollection"/>, so the whole
-/// run pays for one container of each. Tests that leave rows or messages behind start from
-/// <see cref="ResetAsync"/>; nothing relies on test order.
+/// run pays for one container of each. Tests that leave rows, messages or cache entries behind
+/// start from <see cref="ResetAsync"/>; nothing relies on test order.
 /// </summary>
 public sealed class BackendFixture : IAsyncLifetime
 {
@@ -14,15 +14,18 @@ public sealed class BackendFixture : IAsyncLifetime
 
     public RabbitMqFixture RabbitMq { get; } = new();
 
-    public Task InitializeAsync() => Task.WhenAll(Sql.InitializeAsync(), RabbitMq.InitializeAsync());
+    public RedisFixture Redis { get; } = new();
 
-    public Task DisposeAsync() => Task.WhenAll(Sql.DisposeAsync(), RabbitMq.DisposeAsync());
+    public Task InitializeAsync() => Task.WhenAll(Sql.InitializeAsync(), RabbitMq.InitializeAsync(), Redis.InitializeAsync());
 
-    /// <summary>Empty tables, the two seed products back, every queue purged.</summary>
+    public Task DisposeAsync() => Task.WhenAll(Sql.DisposeAsync(), RabbitMq.DisposeAsync(), Redis.DisposeAsync());
+
+    /// <summary>Empty tables, the two seed products back, every queue purged, the cache flushed.</summary>
     public async Task ResetAsync()
     {
         await Sql.ResetAsync();
         await RabbitMq.PurgeAsync();
+        await Redis.FlushAsync();
     }
 }
 

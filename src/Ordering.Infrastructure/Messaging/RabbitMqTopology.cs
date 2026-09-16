@@ -20,6 +20,13 @@ internal static class RabbitMqTopology
     /// <summary>Fanout for messages nobody can parse; a human looks at <see cref="DeadQueue"/>.</summary>
     public const string DeadExchange = "ordering.dead";
 
+    /// <summary>
+    /// Fanout for change hints (Task 13): non-durable, messages non-persistent, no confirms. Each
+    /// API instance binds an exclusive auto-delete queue; a lost hint costs nothing but a later
+    /// refresh, so none of this survives a broker restart on purpose.
+    /// </summary>
+    public const string HintsExchange = "ordering.hints";
+
     public const string OrderCreatedQueue = "notifications.order-created";
 
     public const string DeadQueue = "notifications.dead";
@@ -40,6 +47,10 @@ internal static class RabbitMqTopology
         var delayMs = Math.Min(baseBackoff.TotalMilliseconds * (1L << exponent), maxBackoff.TotalMilliseconds);
         return TimeSpan.FromMilliseconds(delayMs);
     }
+
+    /// <summary>The hints fanout alone; declared by every publisher and every listener, transient on both sides.</summary>
+    public static Task DeclareHintsAsync(IChannel channel, CancellationToken cancellationToken) =>
+        channel.ExchangeDeclareAsync(HintsExchange, ExchangeType.Fanout, durable: false, autoDelete: false, cancellationToken: cancellationToken);
 
     /// <param name="maxAttempts">Tiers exist for attempts 1 … maxAttempts − 1; the last attempt has no retry.</param>
     public static async Task DeclareAsync(IChannel channel, int maxAttempts, TimeSpan baseBackoff, TimeSpan maxBackoff, CancellationToken cancellationToken)

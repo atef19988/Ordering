@@ -30,4 +30,16 @@ public interface IUnitOfWork
     /// when the batch waited too long for a key lock; the transaction is still open either way.
     /// </summary>
     Task<int> SaveChangesAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The only sanctioned place for I/O that must follow a commit (cache eviction, change hints,
+    /// Task 14's gate release). <c>TransactionBehavior</c> runs the registered actions after
+    /// <see cref="CommitAsync"/> returned, in registration order, each best-effort: a failure is
+    /// logged and never fails the request. A rollback forgets them, so they never run for a
+    /// transaction that did not commit.
+    /// </summary>
+    void OnCommitted(Func<CancellationToken, Task> action);
+
+    /// <summary>Hands the registered post-commit actions to the caller and forgets them.</summary>
+    IReadOnlyList<Func<CancellationToken, Task>> TakeCommittedActions();
 }

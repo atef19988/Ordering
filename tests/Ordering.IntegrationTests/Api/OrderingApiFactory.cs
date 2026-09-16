@@ -8,6 +8,7 @@ using Ordering.Application.Notifications;
 using Ordering.Infrastructure.Messaging;
 using Ordering.Infrastructure.Notifications;
 using Ordering.Infrastructure.Outbox;
+using Ordering.Infrastructure.Redis;
 using Ordering.IntegrationTests.Backend;
 using Serilog.Core;
 
@@ -24,7 +25,8 @@ namespace Ordering.IntegrationTests.Api;
 /// <remarks>
 /// <see cref="Messaging"/> is off by default: the relay and consumer are hosted services that
 /// would race the tests which assert on outbox rows, and most tests need neither. Notification
-/// tests turn it on per host.
+/// tests turn it on per host. The change-hint listener and the Redis output cache are always
+/// on — they are part of every API instance and race nothing.
 /// </remarks>
 public sealed class OrderingApiFactory(BackendFixture backend) : WebApplicationFactory<Program>
 {
@@ -55,6 +57,8 @@ public sealed class OrderingApiFactory(BackendFixture backend) : WebApplicationF
         builder.UseSetting($"{RabbitMqOptions.SectionName}:{nameof(RabbitMqOptions.Port)}", rabbit.Port.ToString());
         builder.UseSetting($"{RabbitMqOptions.SectionName}:{nameof(RabbitMqOptions.User)}", rabbit.User);
         builder.UseSetting($"{RabbitMqOptions.SectionName}:{nameof(RabbitMqOptions.Password)}", rabbit.Password);
+
+        builder.UseSetting($"{RedisOptions.SectionName}:{nameof(RedisOptions.Configuration)}", backend.Redis.Configuration);
 
         builder.UseSetting($"{RelayOptions.SectionName}:{nameof(RelayOptions.Enabled)}", Messaging.ToString());
         builder.UseSetting($"{ConsumerOptions.SectionName}:{nameof(ConsumerOptions.Enabled)}", Messaging.ToString());

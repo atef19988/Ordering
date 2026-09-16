@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using FluentValidation;
 using Ordering.Application.Abstractions;
+using Ordering.Application.Abstractions.Caching;
 using Ordering.Application.Abstractions.Messaging;
 using Ordering.Application.Abstractions.Outbox;
 using Ordering.Application.Abstractions.Persistence;
@@ -95,7 +96,8 @@ internal sealed class CreateOrderCommandHandler(
     IOrderRepository orders,
     IOutbox outbox,
     IIdempotencyStore idempotencyKeys,
-    IOrderQueryRepository orderQuery)
+    IOrderQueryRepository orderQuery,
+    ICatalogueCache catalogueCache)
     : BaseCommandHandler<CreateOrderCommand, CreateOrderResponse>(unitOfWork, clock)
 {
     protected override async Task<Result<CreateOrderResponse>> HandleCore(CreateOrderCommand command, CancellationToken cancellationToken)
@@ -163,7 +165,11 @@ internal sealed class CreateOrderCommandHandler(
             }
         }
 
-        // 6. Success: TransactionBehavior commits. The base class's final save has nothing left to flush.
+        // 6. Success: TransactionBehavior commits, then evicts the catalogue pages that still show
+        //    the old stock (never inside the transaction). No change hint: the caller holds the 201
+        //    body, and nobody can be streaming an order that does not exist yet.
+        UnitOfWork.OnCommitted(catalogueCache.InvalidateAsync);
+        // Task 14: UnitOfWork.OnCommitted(...) — confirm the gate reservation as consumed.
         return new CreateOrderResponse(ToDto(order), Replayed: false);
     }
 

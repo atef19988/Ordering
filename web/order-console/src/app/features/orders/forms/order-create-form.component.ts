@@ -117,14 +117,6 @@ function productCodeOf(error: ApiError): string | null {
         <ui-button [disabled]="submitting()" (pressed)="addLine()">+ Add line</ui-button>
       </fieldset>
 
-      <!-- The key is visible on purpose: a retry with the same key is the whole point, and a
-           reviewer (or a support call) can match it against the server's idempotency row. -->
-      <p class="key">
-        <span class="muted">key</span>
-        <span class="data key__value">{{ idempotencyKey() ?? '—' }}</span>
-        <button type="button" class="key__new" [disabled]="submitting()" (click)="newOrder()">New order</button>
-      </p>
-
       @if (problem(); as problem) {
         <ui-alert [tone]="problem.tone" [dismissible]="problem.action === null" (dismissed)="serverError.set(null)">
           {{ problem.message }}
@@ -148,7 +140,14 @@ function productCodeOf(error: ApiError): string | null {
         <ui-button type="submit" variant="primary" [busy]="submitting()" [disabled]="retryAfter.active()">
           Place order
         </ui-button>
+        <ui-button [disabled]="submitting()" (pressed)="newOrder()">New order</ui-button>
       </div>
+
+      <!-- The key is visible on purpose: a retry with the same key is the whole point, and a
+           reviewer (or a support call) can match it against the server's idempotency row. -->
+      <p class="key muted">
+        Idempotency key <span class="data key__value">{{ idempotencyKey() ?? '—' }}</span>
+      </p>
     </form>
   `,
   styles: `
@@ -179,10 +178,11 @@ function productCodeOf(error: ApiError): string | null {
     }
 
     .line__remove {
-      align-self: end;
+      align-self: start;
       width: 28px;
       height: 36px;
-      margin-bottom: calc(var(--s-2) + 1.25em + var(--s-1));
+      /* Sit on the control's row: label height + its gap. */
+      margin-top: calc(var(--t-sm) * 1.45 + var(--s-1));
       border: 0;
       border-radius: var(--r-sm);
       background: transparent;
@@ -206,33 +206,19 @@ function productCodeOf(error: ApiError): string | null {
       color: var(--c-stop);
     }
 
-    .key {
+    .actions {
       display: flex;
       flex-wrap: wrap;
-      align-items: baseline;
       gap: var(--s-2);
-      margin-bottom: var(--s-4);
-      font-size: var(--t-sm);
+    }
+
+    .key {
+      margin-top: var(--s-3);
+      font-size: var(--t-xs);
     }
 
     .key__value {
       overflow-wrap: anywhere;
-    }
-
-    .key__new {
-      margin-left: auto;
-      padding: 0;
-      border: 0;
-      background: transparent;
-      color: var(--c-ink);
-      text-decoration: underline;
-      text-underline-offset: 3px;
-      cursor: pointer;
-    }
-
-    .key__new:disabled {
-      color: var(--c-ink-muted);
-      cursor: not-allowed;
     }
 
     ui-alert {

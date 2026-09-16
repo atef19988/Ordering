@@ -12,6 +12,8 @@ namespace Ordering.Infrastructure.Persistence;
 /// </summary>
 public sealed class UnitOfWork(OrderingDbContext context) : IUnitOfWork
 {
+    private readonly List<Func<CancellationToken, Task>> _committedActions = [];
+
     public async Task BeginTransactionAsync(CancellationToken cancellationToken) =>
         await context.Database.BeginTransactionAsync(cancellationToken);
 
@@ -35,8 +37,9 @@ public sealed class UnitOfWork(OrderingDbContext context) : IUnitOfWork
     }
 
     /// <summary>
-    /// Also empties the change tracker: rows staged before the rollback must not be re-inserted
-    /// by the base handler's final save when the handler goes on to return a success (a replay).
+    /// Also empties the change tracker — rows staged before the rollback must not be re-inserted
+    /// by the base handler's final save when the handler goes on to return a success (a replay) —
+    /// and forgets the post-commit actions: nothing committed, so nothing follows.
     /// </summary>
     public async Task RollbackAsync(CancellationToken cancellationToken)
     {
@@ -46,6 +49,16 @@ public sealed class UnitOfWork(OrderingDbContext context) : IUnitOfWork
         }
 
         context.ChangeTracker.Clear();
+        _committedActions.Clear();
+    }
+
+    public void OnCommitted(Func<CancellationToken, Task> action) => _committedActions.Add(action);
+
+    public IReadOnlyList<Func<CancellationToken, Task>> TakeCommittedActions()
+    {
+        var actions = _committedActions.ToArray();
+        _committedActions.Clear();
+        return actions;
     }
 
     /// <summary>

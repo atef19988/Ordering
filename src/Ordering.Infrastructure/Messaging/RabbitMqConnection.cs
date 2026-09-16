@@ -59,16 +59,18 @@ public sealed partial class RabbitMqConnection(RabbitMqOptions options, string c
     }
 
     /// <summary>
-    /// A channel with publisher confirms on: <c>BasicPublishAsync</c> then completes only once the
-    /// broker has persisted the message. <paramref name="consumerConcurrency"/> is how many
-    /// deliveries the channel's consumer may handle at once (1 for a publish-only channel).
+    /// A channel with publisher confirms on (the default): <c>BasicPublishAsync</c> then completes
+    /// only once the broker has persisted the message. <paramref name="consumerConcurrency"/> is
+    /// how many deliveries the channel's consumer may handle at once (1 for a publish-only
+    /// channel). <paramref name="confirms"/> off is for the change hints only — fire-and-forget,
+    /// the publish returns once the frame is written.
     /// </summary>
-    internal async Task<IChannel> CreateChannelAsync(ushort consumerConcurrency, CancellationToken cancellationToken)
+    internal async Task<IChannel> CreateChannelAsync(ushort consumerConcurrency, CancellationToken cancellationToken, bool confirms = true)
     {
         var connection = await GetAsync(cancellationToken);
         var channelOptions = new CreateChannelOptions(
-            publisherConfirmationsEnabled: true,
-            publisherConfirmationTrackingEnabled: true,
+            publisherConfirmationsEnabled: confirms,
+            publisherConfirmationTrackingEnabled: confirms,
             consumerDispatchConcurrency: consumerConcurrency);
 
         return await connection.CreateChannelAsync(channelOptions, cancellationToken);

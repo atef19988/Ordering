@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Ordering.Api.Sse;
 using Ordering.Application.Abstractions.Messaging;
 using Ordering.Application.Features.Orders.CancelOrder;
 using Ordering.Application.Features.Orders.CreateOrder;
@@ -17,6 +18,15 @@ public static class OrdersEndpoints
             .WithName("GetOrderById")
             .Produces<OrderDetailDto>()
             .ProducesProblem(StatusCodes.Status404NotFound);
+
+        // Server-Sent Events: the full order on connect and after every change, `done` once it
+        // is terminal. Replaces polling GET /api/orders/{id}; the stream itself lives in Api/Sse.
+        orders.MapGet("/{id:long}/events", (long id, OrderEventStream stream, HttpContext context) =>
+                stream.RunAsync(id, context, context.RequestAborted))
+            .WithName("StreamOrderEvents")
+            .Produces(StatusCodes.Status200OK, contentType: SseFrames.ContentType)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         orders.MapPost("/", async (
                 [FromHeader(Name = ApiHeaders.IdempotencyKey)] string? idempotencyKey,
