@@ -47,6 +47,9 @@ public sealed partial class RedisConnection(RedisOptions options, IClock clock, 
 
             var configuration = ConfigurationOptions.Parse(options.Configuration);
             configuration.AbortOnConnectFail = false;
+            configuration.ConnectTimeout = options.ConnectTimeoutMs;
+            configuration.SyncTimeout = options.OperationTimeoutMs;
+            configuration.AsyncTimeout = options.OperationTimeoutMs;
             configuration.ClientName = "ordering-api";
             var endpoint = options.Configuration.Split(',')[0];
 

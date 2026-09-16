@@ -13,4 +13,14 @@ public sealed class RedisOptions
 
     /// <summary>Key prefix, so one Redis can serve several environments.</summary>
     public string InstanceName { get; set; } = "ordering:";
+
+    /// <summary>
+    /// Longest any single Redis command may take before it counts as a failure (sync and async
+    /// timeouts). A cache that answers slower than the database is worse than no cache, and a
+    /// black-holed connection must fail fast, so this is short on purpose.
+    /// </summary>
+    public int OperationTimeoutMs { get; set; } = 500;
+
+    /// <summary>Longest a (re)connect attempt may take; paid once per attempt, in the background after the first.</summary>
+    public int ConnectTimeoutMs { get; set; } = 2000;
 }
