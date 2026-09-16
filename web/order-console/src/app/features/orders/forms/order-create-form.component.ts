@@ -137,7 +137,7 @@ function productCodeOf(error: ApiError): string | null {
       }
 
       <div class="actions">
-        <ui-button type="submit" variant="primary" [busy]="submitting()" [disabled]="retryAfter.active()">
+        <ui-button type="submit" variant="primary" [busy]="submitting()" [disabled]="!valid() || retryAfter.active()">
           Place order
         </ui-button>
         <ui-button [disabled]="submitting()" (pressed)="newOrder()">New order</ui-button>
@@ -274,6 +274,9 @@ export class OrderCreateFormComponent extends BaseFormComponent<OrderDetail> {
   /** Re-evaluated on every value change, so the message follows the array's validator. */
   protected readonly duplicateProduct = signal<string | null>(null);
 
+  /** Follows `form.status`: Place order is enabled only when there is something valid to place. */
+  protected readonly valid = signal(false);
+
   /** The alert for the last failed submit; `null` when the failure was rendered inline instead. */
   protected readonly problem = signal<Problem | null>(null);
 
@@ -292,6 +295,8 @@ export class OrderCreateFormComponent extends BaseFormComponent<OrderDetail> {
       const duplicate = this.lines.errors?.['duplicateProduct'] as { code: string } | undefined;
       this.duplicateProduct.set(duplicate?.code ?? null);
     });
+
+    this.form.statusChanges.pipe(takeUntilDestroyed(destroyRef)).subscribe(() => this.valid.set(this.form.valid));
 
     // `describe()` has side effects (countdown, inline errors, the stock hint), so it runs in an
     // effect rather than a computed.
@@ -323,13 +328,8 @@ export class OrderCreateFormComponent extends BaseFormComponent<OrderDetail> {
 
   /** Back to an empty form with no key; the next edit issues a fresh one. */
   newOrder(): void {
-    this.retryAfter.stop();
-    while (this.lines.length > 1) {
-      this.lines.removeAt(this.lines.length - 1);
-    }
-    this.resetForm({ customerReference: '', lines: [{ productCode: null, quantity: 1 }] });
+    this.clearForm();
     this.placedOrder.set(null);
-    this.idempotencyKey.set(null);
   }
 
   protected perform(): Observable<OrderDetail> {
@@ -353,11 +353,22 @@ export class OrderCreateFormComponent extends BaseFormComponent<OrderDetail> {
   }
 
   protected override onSuccess(order: OrderDetail): void {
+    // The attempt is over: the form is emptied (Place order disables itself until there is a
+    // new valid order) and the key is dropped, so the next order gets a fresh one. The
+    // "Order placed" alert stays until dismissed or the next submit.
+    this.clearForm();
     this.placedOrder.set(order);
     this.placed.emit(order);
-    // The attempt is over: the next edit (or a plain re-submit) gets a fresh key.
+  }
+
+  /** One customer field, one empty line, no key, no server error; the countdown stops. */
+  private clearForm(): void {
+    this.retryAfter.stop();
+    while (this.lines.length > 1) {
+      this.lines.removeAt(this.lines.length - 1);
+    }
+    this.resetForm({ customerReference: '', lines: [{ productCode: null, quantity: 1 }] });
     this.idempotencyKey.set(null);
-    this.form.markAsPristine();
   }
 
   /** Turns one `ApiError` into alert copy — and, for the retryable ones, starts the countdown. */
