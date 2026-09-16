@@ -152,7 +152,8 @@ Rules for every task:
 2. Do not start a task while an earlier one's "Definition of done" is unmet.
 3. Finish with `dotnet build` + `dotnet test` green, then tick the boxes in the task file.
 4. Never weaken a test to make it pass. If a test is wrong, say so and explain why.
-5. Anything you had to assume goes into `README.md` under Assumptions.
+5. Anything you had to assume goes into `docs/assumptions.md` under its task (the root
+   `README.md` is the short reviewer-facing version; keep it short).
 6. Any throughput claim goes into `docs/capacity.md` with the command that produced it.
 
 ## Out of scope
