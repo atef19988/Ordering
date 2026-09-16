@@ -11,7 +11,8 @@ decisions; `docs/tasks/` is the build plan.
 ## Getting started
 
 ```bash
-docker compose up -d                  # SQL Server 2022 on :1433 (db-init creates Ordering); RabbitMQ 4 on :5672, management UI on :15672 (guest/guest, development only)
+docker compose up -d                  # SQL Server 2022 on :1433 (db-init creates Ordering); RabbitMQ 4 on :5672, management UI on :15672 (guest/guest, development only); Redis 7 on :6379
+docker compose --profile app up -d --build   # also builds + runs the API (src/Ordering.Api/Dockerfile, :5000) and the console (web/order-console/Dockerfile, nginx :8080 proxying /api)
 dotnet tool restore                   # pins dotnet-ef 9.0.x (.config/dotnet-tools.json)
 dotnet ef database update -p src/Ordering.Infrastructure -s src/Ordering.Api   # apply migrations
 dotnet run --project src/Ordering.Api -- seed   # migrate + seed the two products, then exit

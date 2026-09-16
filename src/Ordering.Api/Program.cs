@@ -41,7 +41,8 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddOutputCache(options => options.AddPolicy(ProductsEndpoints.CataloguePolicy, policy => policy
     .Expire(TimeSpan.FromSeconds(1))
     .Tag(ProductsEndpoints.CataloguePolicy)
-    .SetVaryByQuery("search", "inStock", "sort", "pageSize", "cursor")));
+    .SetVaryByQuery("search", "inStock", "sort", "pageSize", "cursor")
+    .SetVaryByHost(false)));
 
 // Pushed order status: broker hints → this instance's hub → open event streams.
 builder.Services.AddSingleton(builder.Configuration.GetSection(SseOptions.SectionName).Get<SseOptions>() ?? new SseOptions());

@@ -133,6 +133,7 @@ If you are about to write the same plumbing a second time, move it into a base c
 
 ```bash
 docker compose up -d                 # SQL Server 2022 :1433 (db-init creates Ordering); RabbitMQ :5672 (UI :15672); Redis :6379
+docker compose --profile app up -d --build   # + API image on :5000 and console image (nginx) on :8080
 dotnet run --project src/Ordering.Api # API on https://localhost:5001
 dotnet test                          # all tests (Testcontainers pulls mssql/server:2022-latest, rabbitmq:4-management, redis:7-alpine)
 dotnet ef migrations add <Name> -p src/Ordering.Infrastructure -s src/Ordering.Api

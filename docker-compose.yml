@@ -87,7 +87,7 @@ services:
     ports:
       - "5000:5000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:5000/health || exit 1"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/health"]
       interval: 10s
       timeout: 5s
       retries: 12

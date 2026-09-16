@@ -15,11 +15,13 @@ COPY src/ src/
 RUN dotnet publish src/Ordering.Api/Ordering.Api.csproj -c Release -o /app --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
+# curl is only for the container healthcheck (GET /health); the base image has no HTTP client.
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app .
 
 # Plain HTTP inside the compose network; TLS is the reverse proxy's job.
-ENV ASPNETCORE_URLS=http://+:5000
+ENV ASPNETCORE_HTTP_PORTS=5000
 EXPOSE 5000
 USER app
 ENTRYPOINT ["dotnet", "Ordering.Api.dll"]
