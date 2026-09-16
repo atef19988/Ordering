@@ -15,9 +15,11 @@ docker compose up -d                  # SQL Server 2022 on :1433 (db-init create
 dotnet tool restore                   # pins dotnet-ef 9.0.x (.config/dotnet-tools.json)
 dotnet ef database update -p src/Ordering.Infrastructure -s src/Ordering.Api   # apply migrations
 dotnet run --project src/Ordering.Api -- seed   # migrate + seed the two products, then exit
+dotnet run --project src/Ordering.Api -- seed --products 100000   # + the load catalogue LOAD-000001…; SqlBulkCopy, seconds, re-run adds nothing
 dotnet build                          # net9.0, warnings as errors
 dotnet test                           # unit tests + integration tests on a Testcontainers SQL Server (needs Docker)
 dotnet run --project src/Ordering.Api # https://localhost:5001 — /health (database + RabbitMQ), /swagger; Development also migrates + seeds on startup
+cd web/order-console && npm ci && npm start   # Angular console on http://localhost:4200, /api proxied to the API on :5000; /design is the design reference
 ```
 
 Notification delivery is simulated; switch the failure mode without editing files, e.g.
@@ -399,3 +401,211 @@ Tasks 12–14). The brief's hard rules are unchanged; these say where throughput
   line now uses `{OutboxEventId}`.
 - **Cancelled orders are still notified** (Task 6 decision, unchanged): the `order.created`
   row is published and delivered regardless of the order's later status.
+
+### Task 8 — required tests on real SQL Server + RabbitMQ
+
+- **Wall time.** `dotnet test` from a rebuild: **56 s** on the development laptop (48 unit tests
+  in <1 s; 57 integration tests in 48 s, of which ~25 s is starting the two containers) with the
+  `mssql/server:2022-latest` and `rabbitmq:4-management` images already pulled. A truly clean
+  clone adds the image pulls (~1.5 GB) on top. Two further runs of the integration project
+  passed at the same duration; nothing is skipped and nothing uses `UseInMemoryDatabase`.
+- **One collection, one container of each.** `BackendFixture` owns `SqlServerFixture` and the new
+  `RabbitMqFixture` (Testcontainers.RabbitMq, `rabbitmq:4-management`, user `ordering` — not
+  `guest`, which RabbitMQ only admits from loopback, and Docker's port proxy is not loopback),
+  started together, once for the `Backend` collection. Every integration test class joined that
+  collection; the old `SqlServer` collection is gone so the run never starts a second SQL
+  Server. `ResetAsync` empties the four tables in FK order, re-seeds, then declares the topology
+  and purges every queue `RabbitMqTopology` names (main, retry tiers, dead).
+- **Tests 2 and 3 already existed** (`IdempotencyTests`, Task 5) and were kept where they are;
+  their bodies now use the shared helpers. Tests 1, 5 and the deferred Task 4 multi-line case are
+  `CreateOrderTests`; test 4 and the Task 6 boxes are `CancelOrderTests`; the deferred Task 3 pair
+  is `ReadSideTests`; test 6 and the at-least-once cases are `NotificationDeliveryTests`
+  (suffix `_ThroughBroker`, the slow ones).
+- **Shared harness pieces.** `Concurrency.BurstAsync` (one `TaskCompletionSource` barrier, N
+  real `HttpClient` calls released together — the inline gate from Task 5 moved here),
+  `Concurrency.WaitForAsync` (100 ms poll, 10 s default, throws with the last value),
+  `OrdersApi` (`PostOrderAsync` / `CreateOrderAsync` / `CancelOrderAsync` / `GetOrderAsync` on a
+  plain `HttpClient`), and Dapper helpers on `SqlServerFixture` (`StockAsync`, `CountAsync`,
+  `SnapshotAsync`, `OutboxRowAsync`, `AddProductAsync`). Invariants are asserted from the
+  database; ids are parsed with `long.Parse` from the JSON strings.
+- **`IFailurePoint` is a production seam with a no-op production implementation.**
+  `Application/Abstractions/IFailurePoint.cs` names three points: `transaction.before-commit`
+  (consulted by `TransactionBehavior` between `next()` and `CommitAsync`),
+  `notification.delivered.before-verdict` and `notification.sent.before-ack` (consulted by
+  `NotificationConsumer`). `AddApplication` registers `NoFailurePoint` with `TryAdd`; the test
+  host replaces it with `InjectedFailures`, which arms a point one-shot to either **throw**
+  (test 5: the request ends in a 500 and SQL Server rolls the transaction back — the SQL log
+  shows `UPDATE products` immediately before `ROLLBACK` and no `COMMIT`) or **hold** the caller
+  until the host's stopping token fires (the consumer tests: the test then disposes the host,
+  which is a process dying with an unacknowledged delivery in hand). Nothing is mocked in either.
+- **Per-host test doubles.** `OrderingApiFactory` is one process: its own `Snowflake:WorkerId`,
+  `InjectedFailures`, `DeliveryLog` (a `RecordingDeliveryService` wraps the real
+  `FakeDeliveryService`, whose failure modes still decide the verdict, and records every call),
+  `CapturedLogs` (a Serilog `ILogEventSink` the host picks up through `ReadFrom.Services`) and
+  the EF `SqlStatementLog`. `Messaging = true` turns the relay and consumer on; extra
+  `Settings` (`Notifications:Delivery:FailureMode`, `Notifications:Consumer:MaxAttempts`) are
+  applied per host, so 6a and 6b each run their own host instead of mutating a shared one.
+  Two hosts against one backend is how the at-least-once cases are run.
+- **At-least-once, now proven rather than described** (rule 7; the owner's question for this
+  task). Delivery is outbox → RabbitMQ → consumer with manual acks, so a consumer that dies
+  after the send and before the ack is redelivered to. Two tests kill a real host at exactly
+  those moments and let the broker redeliver to a second host:
+  1. **Died after `Sent` was written, before the ack**
+     (`…DiesAfterTheVerdictBeforeTheAck_IsNotSentAgainOnRedelivery`): the second host's
+     `attempt_count += 1 … WHERE status = 'Processing'` affects no row, the message is
+     acknowledged without a send. Asserted: one send across both hosts, `attempt_count = 1`,
+     the "Duplicate delivery" log line on the second host, main queue empty. **This is the
+     consumer's idempotency on the event id, and the outbox row is where it lives.**
+  2. **Died after the provider accepted the send, before `Sent` was written**
+     (`…DiesAfterDeliveryBeforeTheVerdict_IsSentAgainWithTheSameEventId`): nothing in the
+     database knows the send happened, so the redelivery is counted and sent again. Asserted:
+     two sends, `attempt_count = 2`, both sends carry the **same event id** (`outbox_messages.id`
+     = AMQP `MessageId`), one outbox row, and the row ends `Sent`. This window is inherent to
+     any at-least-once pipeline whose downstream call and verdict are not one atomic step; the
+     design closes it the same way §8 closes payment — the delivery service receives the stable
+     event id as its idempotency key and a real provider deduplicates on it. `FakeDeliveryService`
+     deliberately keeps no state (rule 2), so the test asserts the *shape* of the duplicate
+     rather than hiding it.
+  The same two tests are the Task 7 restart-durability proof (a second host picks up where a
+  dead one stopped); a third test creates rows while no relay or consumer runs and watches a
+  fresh host deliver them.
+- **Mutation check, as the Definition of done asks.** Deleting `AND available_quantity >=
+  @quantity` from `StockRepository.TryDeductAsync`: test 1 fails, and so do the 50-way race
+  (`Expected 49 Actual 0` — the `CHECK` backstop turns the 409s into 500s) and the multi-line
+  test. Deleting `AND status = 'Processing'` from `OutboxStore.CountAttemptAsync`: **6a stays
+  green** — a clean `FailFirstN` run never produces a duplicate delivery, so 6a cannot observe
+  that guard and the task file's expectation there is wrong; the test that goes red is
+  redelivery case 1 above, with `Collection: [DeliveryCall { Attempt = 2, Succeeded = True }]`
+  — the customer notified twice. Both guards were restored; `git diff` on the two files is empty.
+- **Test 5 answers 500.** An exception between the handler and the commit is not an expected
+  failure, so it is not a `Result`; `ExceptionHandlingMiddleware` reports it as a 500
+  ProblemDetails and the transaction is rolled back. The test also proves the host is healthy
+  afterwards: the same key resubmitted immediately gets a 201.
+- **The cancel guard is asserted from the SQL log**: two racing cancels produce two
+  `UPDATE orders … AND status = @p` statements, exactly one `UPDATE products … + @p` restore and
+  two `COMMIT`s (the loser commits an empty transaction and answers 200 from a committed read).
+
+### Task 15 — catalogue paging
+
+- **Built without test code** (owner instruction: "skip tests"), like Tasks 3/4 and 9. The
+  Definition-of-done boxes that *are* tests (the 100,000-row fixture, the walk under concurrent
+  stock updates, the vary-by-query collision test, the p95 assertion) are left unticked; every
+  behaviour behind them was verified by hand against the compose database with 100,002 products
+  and the numbers are in `docs/capacity.md` under "Read path". The harness is Task 8's; the
+  fixture can call `DbInitializer.SeedLoadCatalogueAsync(context, 100_000, ct)` directly.
+- **Keyset, not offset.** `OFFSET n` reads and discards `n` rows on every request — page 1,000
+  costs 1,000× page 1 — and shifts under the stock updates that run all day on `products`, so a
+  walker sees duplicates or gaps. The cursor is "everything after the last row I saw": one index
+  seek per page whatever the depth, stable under inserts and updates. The price is no "jump to
+  page 37"; the console gets Previous/Next and a counter, which is what a catalogue needs.
+- **Prefix match only.** `search` is `code LIKE 'x%' OR name LIKE 'x%'` (case-insensitive by
+  collation), sargable on the clustered key and `ix_products_name`. A contains-match on `name`
+  would need full-text search and is out of scope. `%`, `_`, `[` and `\` in the search are
+  escaped (`ESCAPE '\'`), so `search=50%` finds `50%_off` and nothing else and `search=[` is a
+  bracket, not a character class.
+- **The SQL is assembled, but only from fixed fragments.** The sort column comes from a
+  three-entry dictionary keyed by the whitelisted field; the direction is `ASC`/`DESC` from a
+  bool; the search, stock and seek predicates are appended only when they apply, so each shape
+  gets its own sargable plan instead of one plan hedging on `@x IS NULL OR …`. Request values
+  travel as parameters only.
+- **The price seek parameter is `decimal(18,2)` explicitly** (`Money.Precision`/`Money.Scale`,
+  the column's type). A plain `DbType.Decimal` parameter made SQL Server compare the column
+  against a wider decimal and walk the index — 41 ms p50 growing with depth instead of 6 ms
+  flat. Before/after in `docs/capacity.md`.
+- **The cursor is checked, not signed.** `PageCursor` (`Abstractions/Paging`, generic) carries
+  `{v,f,d,k,c,h}`; decode fails closed on bad base64url, bad JSON, a missing member or another
+  version, and the handler also rejects a cursor whose sort field, direction or filter hash
+  (first 8 hex of SHA-256 over `search|inStock`) differ from the request, or whose `k` does not
+  parse as the sort column's type. All of these are `400 paging.invalid_cursor` — a plain
+  `Error`, not a `ValidationError`, because the fix is "start from page 1", not "change a field".
+- **Validation names the query-string parameter** (`errors.pageSize`, `errors.sort`,
+  `errors.search`), not the C# property, because that is what the caller has to fix. Out-of-range
+  `pageSize` is a 400, never clamped. A `pageSize` that is not an integer at all is rejected by
+  Minimal API binding before the pipeline (also 400).
+- **`total` is `long?`** and therefore a JSON string on the wire (`LongAsStringJsonConverter`
+  applies to `long?` too); the console already types it `number | string | null`. It is counted
+  once per new query with `COUNT_BIG` in the same round trip as the first page, and is absent
+  (`null`) on every later page. `hasMore` comes from the `pageSize + 1` look-ahead row.
+- **Load catalogue.** `seed --products N` bulk-copies `LOAD-000001 … LOAD-{N}` into a temp table
+  in batches of 10,000 and inserts only the codes that do not exist yet, so it is guarded per
+  code like the two brief products and a re-run adds nothing. Names are `<noun> <colour>` from
+  10 × 8 words (100,000 rows → 1,250 per name, plenty of ties and shared prefixes), prices are
+  `0.99 + (i × 37 mod 10,000) / 100` (10,000 distinct values, non-monotonic in code order),
+  stock is 1,000. 100,000 rows: 4.3 s on the compose database.
+- **`available_quantity` is not indexed** and no index carries it: it is written by every order
+  and every cancel. `inStock=true` is evaluated on the rows the seek returns (a 50-row key
+  lookup per page); with the seed above that costs nothing measurable.
+- **Output cache seam.** Task 13 is not built yet; `ProductsEndpoints` carries the `// Task 13:`
+  comment with the exact policy line (`SetVaryByQuery("search", "inStock", "sort", "pageSize",
+  "cursor")`). The collision test belongs to that task.
+
+### Task 9 — Angular foundation
+
+- **Angular 21, zoneless, signals.** The workspace was generated with the CLI installed on the
+  machine (21.x; the spec says 18+). Change detection is zoneless (`ng new --zoneless`), so
+  every piece of state is a signal and every component is `OnPush`; there is no `zone.js` in
+  the bundle. No tests were written for this task (owner instruction: "skip tests").
+- **Same-origin API through the dev-server proxy.** The API has no CORS policy and none is
+  added: `ng serve` proxies `/api` and `/health` to `http://localhost:5000`
+  (`proxy.conf.json`), and `APP_CONFIG.apiBaseUrl` is `/api`. Same-origin also means the
+  browser exposes `Retry-After` to `HttpClient` without an `Access-Control-Expose-Headers`
+  header, and `EventSource` needs no `withCredentials` dance. A deployment that serves the
+  console from another origin has to add CORS (design-only; deployment is out of scope).
+- **`BaseApiService` "unwraps data" is a no-op.** The API returns the DTO as the body, with no
+  envelope, so `get<T>`/`post<T>` return the body as `T`. Failures never reach a component as
+  `HttpErrorResponse`: `apiInterceptor` maps them once to `ApiError` (ProblemDetails `code`,
+  `detail`, every non-standard member as `extensions`, and `Retry-After` in seconds — a
+  delta or an HTTP date). A body without `code` becomes `http.<status>`; no response at all is
+  `network.unreachable` (status 0); an RxJS `TimeoutError` is `network.timeout`.
+- **`isRetryableWithSameKey`** is `status === 0 || status === 503 || code === 'network.timeout'
+  || (status === 409 && code === 'idempotency.in_progress')`. Every 503 is included whatever its
+  code, because a 503 by rule 11 always means "nothing committed, try again".
+- **Only `BaseApiService` may import `HttpClient`** — enforced by ESLint
+  (`no-restricted-imports` on `@angular/common/http` / `HttpClient`, with one override for
+  `lib/api/base-api.service.ts`), so the rule fails the build rather than a code review.
+- **`EventSource` cannot read a status code.** The browser reconnects by itself after a dropped
+  connection (`readyState = CONNECTING`) but gives up for good on a non-200 response or wrong
+  content type (`readyState = CLOSED`). `BaseEventStream` treats the latter as the API's
+  `503 sse.full` and sets `error()` to `ApiError('sse.full', …, 503)`; the owner then falls back
+  to `BaseResource.reload()` every `APP_CONFIG.fallbackPollMs` (10 s). A `done` event closes the
+  stream and sets `done()`. `BaseEventStream` and `BasePagedResource` must be created in an
+  injection context: they stop on the owner's `DestroyRef`.
+- **`BaseResource.reload()` cancels the request in flight**, so a slower, older response can
+  never overwrite a newer one; `set()` lets an event-stream frame or a command response replace
+  the value without a round trip.
+- **Status vocabulary.** `lib/ui/status.ts` holds the one status → tone + label map, keyed by
+  the API's own strings (`Confirmed`, `Cancelled`, `Pending`, `Sent`, `Failed`, `None`) plus the
+  client-side `InsufficientStock`; `ui-badge` and `ui-status-band` read it and nothing else
+  decides a colour. Unknown values render verbatim in the neutral tone rather than being hidden.
+  The band's colour is the **order** status; the notification outcome is the word beside it
+  (`Notification pending · attempt 2`, `Notified after 3 attempts`, `Notification failed after 5
+  attempts`).
+- **`ui-field` wires the projected control.** Callers write `<input class="control" id="x">`;
+  the field finds `#x` after render and sets `aria-invalid` and `aria-describedby` (hint and/or
+  error id). The error region is always present with `aria-live="polite"`, so a message that
+  appears is announced.
+- **`ui-combobox` follows ARIA 1.2**: `role="combobox"` on the input, `aria-expanded`,
+  `aria-controls`, `aria-activedescendant`; options are `role="option"` and deliberately not
+  tab stops (focus never leaves the input — `mousedown` on an option is prevented). Its id
+  input is `inputId`, not `id`, because a plain `id` attribute would land on the host element
+  too and the `<label for>` would point at a non-labelable element. The `search` output keeps
+  the spec's name and carries a documented exception to `no-output-native`. Typed text that was
+  never selected reverts on blur: `selected` is the truth.
+- **Paging mirrors Task 15.** `Page<T>.total` is typed `number | string | null` because it is a
+  `long` on the wire (`LongAsStringJsonConverter`); `BasePagedResource` normalises it with
+  `totalOf()`. `search` is debounced 300 ms inside the resource; every other change requests at
+  once; all requests go through one `switchMap`, so the newest always wins. A
+  `400 paging.invalid_cursor` on a non-first page restarts at page 1 of the same query with no
+  alert. The design reference drives the three paged components from an in-memory
+  `BasePagedResource` over 10,000 generated rows with a base64 keyset cursor of the same shape
+  as the server's (`{v,f,d,k,c,h}`), so the demo exercises stale-cursor rejection too.
+- **Layout classes live in `styles.scss`** (`.console`, `.console__action`, `.console__detail`,
+  `.console__stock`, `.control`, `.data`, `.section-title`) so Task 10's feature components drop
+  into the shell without re-declaring the grid. The route `''` renders the shell with `// Task
+  10:` seams; `/design` is the design reference.
+- **Verified by driving the app**, not only by building it: headless Chrome over the DevTools
+  protocol at 1440/1024/400/360 px (no console errors, no horizontal overflow at 360 even with a
+  15 px classic scrollbar), the combobox keyboard pass (type → 10 options; ↓↓ → option 1 via
+  `aria-activedescendant`; Enter selects and closes; ↓ reopens; Escape closes; focus stayed on
+  the input throughout), Next/Previous, header sort (`aria-sort` follows), and prefix search.
+

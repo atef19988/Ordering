@@ -18,8 +18,8 @@ internal sealed class OrderLineConfiguration : IEntityTypeConfiguration<OrderLin
         builder.Property(line => line.OrderId).HasColumnName("order_id");
         builder.Property(line => line.ProductCode).HasColumnName("product_code").HasMaxLength(Product.CodeMaxLength);
         builder.Property(line => line.Quantity).HasColumnName("quantity");
-        builder.Property(line => line.UnitPrice).HasColumnName("unit_price").HasPrecision(18, Money.Scale);
-        builder.Property(line => line.LineTotal).HasColumnName("line_total").HasPrecision(18, Money.Scale);
+        builder.Property(line => line.UnitPrice).HasColumnName("unit_price").HasPrecision(Money.Precision, Money.Scale);
+        builder.Property(line => line.LineTotal).HasColumnName("line_total").HasPrecision(Money.Precision, Money.Scale);
 
         builder.HasIndex(line => line.OrderId).HasDatabaseName("ix_order_lines_order_id");
 

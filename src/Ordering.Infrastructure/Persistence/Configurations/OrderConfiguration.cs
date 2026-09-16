@@ -17,7 +17,7 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
 
         builder.Property(o => o.CustomerReference).HasColumnName("customer_reference").HasMaxLength(Order.CustomerReferenceMaxLength);
         builder.Property(o => o.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(16);
-        builder.Property(o => o.Total).HasColumnName("total").HasPrecision(18, Money.Scale);
+        builder.Property(o => o.Total).HasColumnName("total").HasPrecision(Money.Precision, Money.Scale);
         builder.Property(o => o.CreatedAt).HasColumnName("created_at").HasColumnType("datetimeoffset");
         builder.Property(o => o.CancelledAt).HasColumnName("cancelled_at").HasColumnType("datetimeoffset");
 

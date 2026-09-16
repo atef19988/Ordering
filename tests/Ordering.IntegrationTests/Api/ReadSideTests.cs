@@ -34,11 +34,16 @@ public sealed class ReadSideTests(BackendFixture backend, OrderingApiFactory api
         Assert.Contains("\"price\":12.50", json, StringComparison.Ordinal);
         Assert.Contains("\"price\":4.00", json, StringComparison.Ordinal);
 
-        var products = JsonDocument.Parse(json).RootElement.EnumerateArray()
+        // Task 15: the catalogue is a keyset page; with two products it is the whole (first and last) page.
+        var page = JsonDocument.Parse(json).RootElement;
+        var products = page.GetProperty("items").EnumerateArray()
             .Select(p => (Code: p.GetProperty("code").GetString(), Price: p.GetProperty("price").GetDecimal(), Stock: p.GetProperty("availableQuantity").GetInt32()))
-            .OrderBy(p => p.Code)
             .ToList();
         Assert.Equal([("SKU-001", 12.50m, 10), ("SKU-002", 4.00m, 40)], products);
+        Assert.Equal(50, page.GetProperty("pageSize").GetInt32());
+        Assert.False(page.GetProperty("hasMore").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, page.GetProperty("nextCursor").ValueKind);
+        Assert.Equal("2", page.GetProperty("total").GetString());
     }
 
     [Fact]

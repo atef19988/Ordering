@@ -20,7 +20,12 @@ internal sealed class ProductConfiguration : IEntityTypeConfiguration<Product>
 
         builder.Property(p => p.Code).HasColumnName("code").HasMaxLength(Product.CodeMaxLength);
         builder.Property(p => p.Name).HasColumnName("name").HasMaxLength(Product.NameMaxLength);
-        builder.Property(p => p.Price).HasColumnName("price").HasPrecision(18, Money.Scale);
+        builder.Property(p => p.Price).HasColumnName("price").HasPrecision(Money.Precision, Money.Scale);
         builder.Property(p => p.AvailableQuantity).HasColumnName("available_quantity");
+
+        // Keyset paging (Task 15): one seek per page for sort=name / sort=price; sort=code uses the
+        // clustered key. Nothing carries available_quantity — it is written by every order.
+        builder.HasIndex(p => new { p.Name, p.Code }).HasDatabaseName("ix_products_name");
+        builder.HasIndex(p => new { p.Price, p.Code }).HasDatabaseName("ix_products_price");
     }
 }

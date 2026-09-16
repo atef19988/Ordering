@@ -32,5 +32,10 @@ line evidence for each:
 17. Every tuning change in Tasks 12–14 has a before/after row in `docs/capacity.md`
 18. Angular: no direct `HttpClient` or `EventSource` outside `lib/`; idempotency key policy
     implemented; every 503 retries with the same key
+19. No endpoint returns an unbounded list: `GET /api/products` is keyset-paged with
+    `pageSize` ≤ 200, sort columns come from a whitelist, `LIKE` input is escaped, the cursor is
+    validated against the current sort and filter, and the output cache varies by every paging key
+20. Angular never sorts or filters product rows client-side and never requests the catalogue
+    without `pageSize`; the picker is a typeahead, not a `<select>` over the table
 
 For each failure, give the smallest fix. Do not fix anything yet — report first.

@@ -246,6 +246,12 @@ namespace Ordering.Infrastructure.Migrations
                     b.HasKey("Code")
                         .HasName("pk_products");
 
+                    b.HasIndex("Name", "Code")
+                        .HasDatabaseName("ix_products_name");
+
+                    b.HasIndex("Price", "Code")
+                        .HasDatabaseName("ix_products_price");
+
                     b.ToTable("products", null, t =>
                         {
                             t.HasCheckConstraint("ck_products_price_non_negative", "[price] >= 0");

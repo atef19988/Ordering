@@ -5,6 +5,7 @@ namespace Ordering.Domain.Common;
 /// </summary>
 public static class Money
 {
+    public const int Precision = 18;
     public const int Scale = 2;
 
     /// <summary>Commercial rounding: half away from zero, so 0.125 becomes 0.13.</summary>

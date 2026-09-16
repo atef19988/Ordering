@@ -15,15 +15,16 @@ before the frontend and the docs.
 | 6 | 6 | `/task6` | `POST /api/orders/{id}/cancel` | 4 |
 | 7 | 7 | `/task7` | Outbox relay → RabbitMQ → notification consumers | 4 |
 | 8 | 8 | `/task8` | Required automated tests on real SQL Server + RabbitMQ | 3–7 |
-| 9 | 12 | `/task12` | Write path: measure, then RCSI, fast-fail read, one-round-trip deduct | 8 |
-| 10 | 13 | `/task13` | Read path: output cache + SSE push over a RabbitMQ fan-out | 7, 8 |
-| 11 | 14 | `/task14` | Admission control: concurrency limits, sold-out fast-fail, 503s | 12, 13 |
-| 12 | 9 | `/task9` | Angular foundation: design system + `lib/` base services | — |
-| 13 | 10 | `/task10` | Angular order feature: form, lookup, cancel, live status | 9, 3–6, 13, 14 |
-| 14 | 11 | `/task11` | README, capacity sign-off, one-page design note | all |
+| 9 | 15 | `/task15` | Catalogue at scale: keyset paging, prefix filter, whitelisted sort on `GET /api/products` | 3 |
+| 10 | 12 | `/task12` | Write path: measure, then RCSI, fast-fail read, one-round-trip deduct | 8 |
+| 11 | 13 | `/task13` | Read path: output cache (varies by paging keys) + SSE push over a RabbitMQ fan-out | 7, 8, 15 |
+| 12 | 14 | `/task14` | Admission control: concurrency limits, sold-out fast-fail, 503s | 12, 13 |
+| 13 | 9 | `/task9` | Angular foundation: design system + `lib/` base services + paged primitives | — |
+| 14 | 10 | `/task10` | Angular order feature: form, typeahead picker, paged stock panel, cancel, live status | 9, 3–6, 15, 13, 14 |
+| 15 | 11 | `/task11` | README, capacity sign-off, one-page design note | all |
 
-Tasks 1–8 are the brief's backend, 12–14 the scaling work, 9–10 frontend, 11 documentation.
-9 can start any time.
+Tasks 1–8 are the brief's backend, 12–15 the scaling work, 9–10 frontend, 11 documentation.
+9 can start any time; 15 only needs 3 and can run as soon as the catalogue needs it.
 
 ## Scope decisions behind Tasks 12–14 (owner instructions, after Task 4)
 
@@ -72,3 +73,4 @@ Tasks 1–8 are the brief's backend, 12–14 the scaling work, 9–10 frontend, 
 | Status is pushed, not polled | 13, 10 |
 | Bursts are answered with 503 + `Retry-After`, never 500 or a pool timeout | 14 |
 | Capacity is measured and written down, before and after each change | 12, 11 |
+| No endpoint returns an unbounded list; the catalogue is paged, filtered and sorted on the server | 15, 9, 10 |

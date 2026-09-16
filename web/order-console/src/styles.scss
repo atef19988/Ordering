@@ -1,0 +1,163 @@
+@use 'app/lib/tokens/tokens';
+
+// Base — an instrument panel: dense, quiet, left-aligned. No gradients, no decorative shadows.
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color: var(--c-ink);
+  background: var(--c-surface);
+  font: var(--t-base) / 1.45 var(--f-ui);
+  -webkit-font-smoothing: antialiased;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--c-ink);
+}
+
+// Quality floor: focus is always visible, and motion only ever answers an action.
+:focus-visible {
+  outline: 2px solid var(--c-ink);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+// Monospace is load-bearing: ids, keys, codes, quantities and money align in columns.
+.data {
+  font-family: var(--f-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.prose {
+  max-width: 70ch;
+}
+
+.muted {
+  color: var(--c-ink-muted);
+}
+
+.section-title {
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-ink-muted);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+// Form controls: one look, owned here so `ui-field` can project any native control.
+.control {
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+
+  &.control--data {
+    font-family: var(--f-data);
+    font-variant-numeric: tabular-nums;
+  }
+
+  &[aria-invalid='true'] {
+    border-color: var(--c-stop);
+  }
+
+  &:disabled {
+    background: var(--c-panel);
+    color: var(--c-ink-muted);
+  }
+}
+
+// Console layout — header, action column (fixed 380px), detail column (fluid), stock band.
+// Two columns at >=1024px, stacked below. Shared here so Task 10's feature reuses it.
+.console {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    'action'
+    'detail'
+    'stock';
+  min-height: calc(100vh - 49px);
+
+  @media (min-width: 1024px) {
+    grid-template-columns: 380px minmax(0, 1fr);
+    grid-template-rows: 1fr auto;
+    grid-template-areas:
+      'action detail'
+      'stock  stock';
+  }
+}
+
+.console__action {
+  grid-area: action;
+  padding: var(--s-6) var(--s-4);
+  background: var(--c-panel);
+  border-bottom: 1px solid var(--c-line);
+
+  @media (min-width: 1024px) {
+    border-right: 1px solid var(--c-line);
+    border-bottom: 0;
+  }
+}
+
+.console__detail {
+  grid-area: detail;
+  padding: var(--s-6) var(--s-4);
+  min-width: 0;
+}
+
+.console__stock {
+  grid-area: stock;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-6);
+  align-items: baseline;
+  padding: var(--s-3) var(--s-4);
+  border-top: 1px solid var(--c-line);
+}

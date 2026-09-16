@@ -1,5 +1,5 @@
 ---
-description: Task 9 — Angular design system and lib/ base code
+description: Task 9 — Angular design system, lib/ base code, paged primitives
 ---
 
 ## Task 9
@@ -11,7 +11,7 @@ Read, in this order:
 
 Then implement it completely.
 
-**Focus:** Build to docs/design-system.md. Base API service, base form component, ui/ primitives, tokens.
+**Focus:** Build to docs/design-system.md. Base API service, base form component, ui/ primitives, tokens — and the paged primitives (`BasePagedResource`, `ui-data-table`, `ui-paginator`, `ui-combobox`) that Task 10 needs for a large catalogue.
 
 ### How to work
 

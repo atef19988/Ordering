@@ -14,7 +14,7 @@ the only things that decide stock.
 k6, run through Docker so nobody installs anything:
 
 ```bash
-dotnet run --project src/Ordering.Api -- seed --products 200    # adds LOAD-0001..LOAD-0200, 1,000,000 units each; the two brief products are untouched
+dotnet run --project src/Ordering.Api -- seed --products 200    # adds LOAD-000001..LOAD-000200 (Task 15's switch; add it here if 15 has not run yet); the two brief products are untouched
 docker run --rm -i -e API_BASE=http://host.docker.internal:5000 -e SCENARIO=hot grafana/k6 run - < tools/load/create-orders.js
 ```
 
@@ -23,7 +23,7 @@ Scripts (ES modules, no bundler):
 | File | What it does |
 |---|---|
 | `create-orders.js` | `constant-arrival-rate` stages 50 → 200 → 800 → 3200 req/s, 30 s each; fresh `crypto.randomUUID()` key per request; `SCENARIO=hot` → every order is 1 × `LOAD-0001`; `SCENARIO=spread` → one random product per order; `SCENARIO=multi` → 3 random products. Thresholds: `http_req_failed{status:500} == 0`, `p(95) < 500ms` |
-| `read-products.js` | `GET /api/products` at 2,000 req/s **while** `create-orders.js hot` runs (open two terminals; write it in the README) |
+| `read-products.js` | `GET /api/products?search=<random 1–3 char prefix>&sort=<random>&pageSize=50`, walking `nextCursor` for 3 pages, at 2,000 req/s **while** `create-orders.js hot` runs (open two terminals; write it in the README). Task 15's paged shape — never the whole table |
 | `read-order.js` | `GET /api/orders/{id}` over ids captured from a create run |
 | `waits.sql` | snapshot `sys.dm_os_wait_stats` for `LCK_M_X`, `LCK_M_U`, `LCK_M_S`, `WRITELOG`, `PAGELATCH_*`; run before and after, subtract |
 | `seed.js` | 200 products only — the API's `seed --products` is the supported path; this is for a broker-less DB |

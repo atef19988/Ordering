@@ -1,5 +1,5 @@
 ---
-description: Task 10 — Angular order form, lookup, cancel, live status
+description: Task 10 — Angular order form, typeahead picker, paged stock panel, cancel, live status
 ---
 
 ## Task 10
@@ -11,7 +11,7 @@ Read, in this order:
 
 Then implement it completely.
 
-**Focus:** Idempotency key policy is the graded detail — every 503 retries with the same key after `Retry-After`. Live status comes from the SSE stream, never polling while connected. Render every state in the spec.
+**Focus:** Idempotency key policy is the graded detail — every 503 retries with the same key after `Retry-After`. The catalogue is paged/filtered/sorted on the server: typeahead picker, paged stock panel with URL state, never more than one page in the browser. Live status from the SSE stream. Render every state in the spec.
 
 ### How to work
 

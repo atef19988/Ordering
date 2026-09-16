@@ -1,0 +1,202 @@
+<div class="page">
+  <header class="intro">
+    <h2 class="heading">Design reference</h2>
+    <p class="prose muted">
+      Every <code>ui-*</code> component in every state, and the tokens they are built from. An
+      instrument panel: dense, quiet, left-aligned. The status band is the only saturated element.
+    </p>
+  </header>
+
+  <section class="block" aria-labelledby="tokens">
+    <h3 id="tokens" class="section-title">Tokens</h3>
+
+    <h4 class="sub">Colour</h4>
+    <ul class="swatches">
+      @for (colour of colours; track colour[0]) {
+        <li class="swatch">
+          <span class="chip" [style.background]="'var(' + colour[0] + ')'"></span>
+          <code class="data">{{ colour[0] }}</code>
+          <span class="muted">{{ colour[1] }}</span>
+        </li>
+      }
+    </ul>
+
+    <h4 class="sub">Type</h4>
+    <ul class="type">
+      @for (size of typeScale; track size) {
+        <li [style.font-size]="'var(--t-' + size + ')'">
+          <code class="data">--t-{{ size }}</code> Order 8f31… confirmed
+        </li>
+      }
+      <li class="data">--f-data 0123456789 SKU-001 25.00</li>
+    </ul>
+
+    <h4 class="sub">Space</h4>
+    <ul class="space">
+      @for (step of spacing; track step) {
+        <li>
+          <span class="bar" [style.width]="'var(--s-' + step + ')'"></span>
+          <code class="data">--s-{{ step }}</code>
+        </li>
+      }
+    </ul>
+  </section>
+
+  <section class="block" aria-labelledby="buttons">
+    <h3 id="buttons" class="section-title">ui-button</h3>
+    <div class="row">
+      <ui-button variant="primary">Place order</ui-button>
+      <ui-button>Look up</ui-button>
+      <ui-button variant="danger">Cancel order</ui-button>
+    </div>
+    <div class="row">
+      <ui-button variant="primary" [disabled]="true">Place order</ui-button>
+      <ui-button [disabled]="true">Look up</ui-button>
+      <ui-button variant="danger" [disabled]="true">Cancel order</ui-button>
+    </div>
+    <div class="row">
+      <ui-button variant="primary" [busy]="true">Place order</ui-button>
+      <ui-button [busy]="true">Look up</ui-button>
+      <ui-button variant="danger" [busy]="true">Cancel order</ui-button>
+    </div>
+    <div class="row">
+      <ui-button variant="primary" [busy]="busy()" (pressed)="toggleBusy()">Press me: busy for 1.5 s</ui-button>
+    </div>
+  </section>
+
+  <section class="block" aria-labelledby="fields">
+    <h3 id="fields" class="section-title">ui-field</h3>
+    <div class="fields">
+      <ui-field label="Customer reference" for="f-default">
+        <input id="f-default" class="control" value="ACME-42" />
+      </ui-field>
+      <ui-field label="Order id" for="f-hint" hint="Paste the id from the placed-order toast.">
+        <input id="f-hint" class="control control--data" value="7312894501234567890" />
+      </ui-field>
+      <ui-field label="Quantity" for="f-error" error="Must be at least 1.">
+        <input id="f-error" class="control control--data" type="number" value="0" />
+      </ui-field>
+      <ui-field label="Idempotency key" for="f-disabled" [optional]="true">
+        <input id="f-disabled" class="control control--data" value="2f9c8e1a-…" disabled />
+      </ui-field>
+    </div>
+  </section>
+
+  <section class="block" aria-labelledby="table">
+    <h3 id="table" class="section-title">ui-table</h3>
+    <ui-table
+      caption="Order lines"
+      [columns]="lineColumns"
+      [rows]="lines"
+      [footer]="linesFooter"
+      [showCaption]="true"
+    />
+    <h4 class="sub">Empty</h4>
+    <ui-table caption="Order lines" [columns]="lineColumns" [rows]="[]" empty="No lines yet." />
+  </section>
+
+  <section class="block" aria-labelledby="badges">
+    <h3 id="badges" class="section-title">ui-badge</h3>
+    <ul class="badges">
+      @for (status of statuses; track status) {
+        <li>
+          <ui-badge [status]="status" />
+          <code class="data muted">{{ status }}</code>
+        </li>
+      }
+      <li>
+        <ui-badge status="Unknown" />
+        <code class="data muted">unknown value, shown verbatim</code>
+      </li>
+    </ul>
+  </section>
+
+  <section class="block" aria-labelledby="band">
+    <h3 id="band" class="section-title">ui-status-band</h3>
+    <div class="bands">
+      @for (state of bandStates; track $index) {
+        <ui-status-band
+          [status]="state.status"
+          [notification]="state.notification"
+          [attempts]="state.attempts"
+        />
+      }
+      <ui-status-band status="Confirmed" />
+    </div>
+    <h4 class="sub">Live — the only motion in the console</h4>
+    <ui-status-band
+      [status]="band().status"
+      [notification]="band().notification"
+      [attempts]="band().attempts"
+    />
+    <div class="row">
+      <ui-button (pressed)="nextBand()">Next state</ui-button>
+    </div>
+  </section>
+
+  <section class="block" aria-labelledby="alerts">
+    <h3 id="alerts" class="section-title">ui-alert</h3>
+    <div class="alerts">
+      <ui-alert>Look up an order by id, or place one.</ui-alert>
+      <ui-alert tone="ok" title="Order placed">
+        Id <span class="data">7312894501234567890</span>.
+      </ui-alert>
+      <ui-alert tone="wait" title="Still processing">
+        This order is still being processed. Retry with the same key.
+        <div slot="actions">
+          <ui-button>Retry with the same key</ui-button>
+        </div>
+      </ui-alert>
+      <ui-alert tone="stop" title="Not enough stock">
+        Only 1 left of SKU-001. Lower the quantity or pick another product.
+      </ui-alert>
+      <ui-alert tone="stop" title="Key reuse">
+        That key was used for a different order. Start a new order to get a new key.
+        <div slot="actions">
+          <ui-button variant="primary">Start a new order</ui-button>
+        </div>
+      </ui-alert>
+      <ui-alert tone="stop" title="Notification failed">
+        Customer notification failed after 5 attempts.
+      </ui-alert>
+      <ui-alert tone="void">Order cancelled</ui-alert>
+      @if (alertVisible()) {
+        <ui-alert [dismissible]="true" (dismissed)="alertVisible.set(false)">
+          Dismissible. Press ✕ to close.
+        </ui-alert>
+      } @else {
+        <div class="row">
+          <ui-button (pressed)="alertVisible.set(true)">Show the dismissible alert again</ui-button>
+        </div>
+      }
+    </div>
+  </section>
+
+  <section class="block" aria-labelledby="spinner">
+    <h3 id="spinner" class="section-title">ui-spinner</h3>
+    <div class="row">
+      <ui-spinner />
+      <ui-spinner size="md" />
+      <ui-spinner label="Looking up order" [showLabel]="true" />
+    </div>
+  </section>
+
+  <section class="block" aria-labelledby="paged">
+    <h3 id="paged" class="section-title">Paged primitives</h3>
+    <p class="prose muted">
+      <code>BasePagedResource</code> over 10,000 in-memory rows with the API's keyset cursor:
+      prefix search, whitelisted sort from the headers, Previous/Next, first-page-only total.
+      Previous rows stay visible under the loading overlay; below 600px the table becomes cards.
+    </p>
+    <app-demo-catalogue />
+  </section>
+
+  <section class="block" aria-labelledby="form">
+    <h3 id="form" class="section-title">BaseFormComponent</h3>
+    <p class="prose muted">
+      Submit empty to see validation announced under each field; tick the box to see a server
+      error through <code>ui-alert</code>. Nothing here touches the network.
+    </p>
+    <app-demo-form />
+  </section>
+</div>

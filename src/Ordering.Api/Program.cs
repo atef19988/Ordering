@@ -34,10 +34,16 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
-// `dotnet run -- seed`: migrate + seed, then exit without serving.
+// `dotnet run -- seed [--products N]`: migrate + seed (+ the load catalogue), then exit without serving.
 if (args.Contains("seed", StringComparer.OrdinalIgnoreCase))
 {
     await DbInitializer.InitializeAsync(app.Services, CancellationToken.None);
+
+    if (LoadProductsArg(args) is { } products)
+    {
+        await DbInitializer.SeedLoadCatalogueAsync(app.Services, products, CancellationToken.None);
+    }
+
     return;
 }
 
@@ -58,5 +64,20 @@ if (app.Configuration.GetValue<bool>(Ordering.Infrastructure.DependencyInjection
 }
 
 app.Run();
+
+/// <summary>The value after <c>--products</c>, or null when the switch is absent.</summary>
+static int? LoadProductsArg(string[] args)
+{
+    var index = Array.FindIndex(args, a => string.Equals(a, "--products", StringComparison.OrdinalIgnoreCase));
+
+    if (index < 0)
+    {
+        return null;
+    }
+
+    return index + 1 < args.Length && int.TryParse(args[index + 1], out var count) && count >= 0
+        ? count
+        : throw new ArgumentException("--products must be followed by a non-negative integer, e.g. `seed --products 100000`.");
+}
 
 public partial class Program;

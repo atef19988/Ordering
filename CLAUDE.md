@@ -79,6 +79,8 @@ leaves `Infrastructure/Messaging` and `Infrastructure/Redis`.
   after a commit.
 - `IEventPublisher` (Task 7), `IChangeHintPublisher` (Task 13), `IStockGate` and
   `IIdempotencyCache` (Task 14) — the only broker/Redis seams `Application` sees.
+- `IFailurePoint` (Task 8) — the only test seam in production code: `TransactionBehavior` and
+  the consumer report named points; production registers `NoFailurePoint`, tests inject crashes.
 
 If you are about to write the same plumbing a second time, move it into a base class first.
 
@@ -111,6 +113,10 @@ If you are about to write the same plumbing a second time, move it into a base c
 11. **No 500 under load.** When full, the API answers `503` with `Retry-After` — from the rate
     limiter, the stock gate or a lock timeout — never a pool timeout, never an unhandled
     `SqlException`.
+12. **No endpoint returns an unbounded list.** Lists are keyset-paged on the server
+    (`Page<T>`, `pageSize` ≤ 200, opaque cursor), filtered and sorted in SQL from a whitelist —
+    never from the request string — and the browser never holds more than one page. Client-side
+    sorting or filtering of server data is a bug.
 
 ## Style
 
@@ -137,8 +143,8 @@ cd web/order-console && npm start    # Angular on 4200
 
 ## Task workflow
 
-Tasks are `/task1` … `/task14`; `docs/tasks/00-overview.md` gives the **run order** (12–14 run
-after 8, before 9). Each command file tells you which spec in `docs/tasks/` to read.
+Tasks are `/task1` … `/task15`; `docs/tasks/00-overview.md` gives the **run order** (12–15 run
+after 8, before 10). Each command file tells you which spec in `docs/tasks/` to read.
 
 Rules for every task:
 1. Read `CLAUDE.md`, `docs/architecture.md` and the task spec before writing code.

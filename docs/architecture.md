@@ -212,12 +212,21 @@ intent id as the provider's idempotency key, then commits the result in a separa
 transaction. If the provider succeeds and the app dies before that commit, reconciliation
 re-queries the provider with the same idempotency key and converges — it never double-charges.
 
-## 9. Read path (Task 13)
+## 9. Read path (Tasks 13 and 15)
 
-`GET /api/products` is served by ASP.NET Core output caching backed by Redis (1 s TTL, tag
-`catalogue`), shared by every instance; create and cancel evict the tag after commit, so the
-TTL is only the bound on a lost eviction. Redis down = cache miss, never an error.
-`GET /api/orders/{id}` is not cached. `GET /api/orders/{id}/events` is a Server-Sent Events
+`GET /api/products` is **keyset-paged** (Task 15): `search` (prefix on code or name, sargable),
+`inStock`, a whitelisted `sort` (`code` | `name` | `price`, optional `:desc`, always tie-broken by
+`code`), `pageSize` 1–200, and an opaque cursor holding the last row's sort key and code plus a
+hash of the filter so a cursor cannot be replayed against a different query. Each page is one
+index seek (`ix_products_name (name, code)`, `ix_products_price (price, code)`, the clustered key
+for `code`) plus a 50-row lookup; `total` is counted once, on the first page. Offset paging was
+rejected because it re-reads every skipped row and shifts under the stock updates that run all
+day on this table. `available_quantity` is deliberately not indexed: it is written by every order.
+
+The paged response is served by ASP.NET Core output caching backed by Redis (1 s TTL, tag
+`catalogue`, varying by all five query keys), shared by every instance; create and cancel evict
+the tag after commit, so the TTL is only the bound on a lost eviction. Redis down = cache miss,
+never an error. `GET /api/orders/{id}` is not cached. `GET /api/orders/{id}/events` is a Server-Sent Events
 stream that sends the full `OrderDetailDto` on connect and again on every change hint; hints are
 `{orderId}` on a non-durable fanout exchange `ordering.hints`, published after cancel commits and
 after the consumer writes a verdict, consumed by every API instance into an in-process hub. The

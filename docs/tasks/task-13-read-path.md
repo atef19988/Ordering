@@ -33,11 +33,16 @@ release). Nothing else may run I/O after a commit.
 
 ```csharp
 builder.Services.AddStackExchangeRedisOutputCache(o => { o.Configuration = ...; o.InstanceName = ...; });
-builder.Services.AddOutputCache(o => o.AddPolicy("catalogue", p => p.Expire(TimeSpan.FromSeconds(1)).Tag("catalogue")));
+builder.Services.AddOutputCache(o => o.AddPolicy("catalogue", p => p
+    .Expire(TimeSpan.FromSeconds(1))
+    .Tag("catalogue")
+    .SetVaryByQuery("search", "inStock", "sort", "pageSize", "cursor")));   // Task 15's paging keys — never rely on the default
 products.MapGet("/", ...).CacheOutput("catalogue");
 ```
 
 - Redis-backed, so every API instance shares one copy and one eviction.
+- Varies by every paging key, so page 2 of one search can never be served for page 1 of another
+  (Task 15 has the collision test; if Task 15 ran first, this line already exists — keep one).
 - Eviction on change: `ICatalogueCache.InvalidateAsync(ct)` (`Application/Abstractions/Caching/`)
   implemented by `IOutputCacheStore.EvictByTagAsync("catalogue")`, registered through
   `OnCommitted` by the create and cancel handlers (fill the `// Task 13:` seams). The TTL is the
